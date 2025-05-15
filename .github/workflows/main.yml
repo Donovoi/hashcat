@@ -133,13 +133,13 @@ jobs:
             rm -rf "$d"
           done
 
-      - name: Create hashcat-nightly.7z
-        run: 7z a -t7z -mx=9 hashcat-nightly.7z ./*
+      - name: Create hashcat.7z
+        run: 7z a -t7z -mx=9 hashcat.7z ./*
 
       - uses: ncipollo/release-action@v1
         with:
-          tag: nightly-${{ github.sha }}
-          name: "Nightly build – ${{ github.sha }}"
-          artifacts: hashcat-nightly.7z
+          tag: Hashcat-Latest
+          name: "Hashcat-Latest"
+          artifacts: hashcat.7z
           allowUpdates: true
           generateReleaseNotes: true
