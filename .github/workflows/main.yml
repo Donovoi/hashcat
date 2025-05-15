@@ -2,7 +2,7 @@ name: Auto-Sync-Nightly
 
 on:
   schedule:
-    - cron: "*/30 * * * *"               # every 30 min (UTC)
+    - cron: "*/30 * * * *"          # every 30 min
   workflow_dispatch:
     inputs:
       force_build:
@@ -11,19 +11,19 @@ on:
         default: false
 
 permissions:
-  contents: read                         # default; release job elevates
+  contents: read                    # default; release job elevates
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-################################################################################
-# 1) SYNC – fast-forward fork/master from upstream master
-################################################################################
 jobs:
+#-----------------------------------------------------------------------------
+# 1) SYNC – fast-forward fork/master from upstream master
+#-----------------------------------------------------------------------------
   sync:
     runs-on: ubuntu-22.04
-    permissions: { contents: write }     # push with PAT
+    permissions: { contents: write }      # push with PAT triggers downstream WF
     outputs:
       changed: ${{ steps.sync.outputs.has_new_commits }}
     steps:
@@ -38,9 +38,9 @@ jobs:
           target_sync_branch: master
           target_repo_token: ${{ secrets.PAT_PUSH }}
 
-################################################################################
-# 2) BUILD – compile on six OS/variant combos, upload artefacts as parts-*
-################################################################################
+#-----------------------------------------------------------------------------
+# 2) BUILD – six OS/variant combos; upload artefacts as parts-*
+#-----------------------------------------------------------------------------
   build:
     needs: sync
     if: needs.sync.outputs.changed == 'true' ||
@@ -50,22 +50,37 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04  ; os_name: linux   ; shared: 0
-          - os: ubuntu-22.04  ; os_name: linux   ; shared: 1
-          - os: macos-14      ; os_name: macos   ; shared: 0
-          - os: macos-14      ; os_name: macos   ; shared: 1
-          - os: windows-2022  ; os_name: windows ; shared: 0
-          - os: windows-2022  ; os_name: windows ; shared: 1
+          # ---------- Linux ----------
+          - os: ubuntu-22.04
+            os_name: linux
+            shared: 0
+          - os: ubuntu-22.04
+            os_name: linux
+            shared: 1
+          # ---------- macOS ----------
+          - os: macos-14
+            os_name: macos
+            shared: 0
+          - os: macos-14
+            os_name: macos
+            shared: 1
+          # ---------- Windows ----------
+          - os: windows-2022
+            os_name: windows
+            shared: 0
+          - os: windows-2022
+            os_name: windows
+            shared: 1
     runs-on: ${{ matrix.os }}
     permissions: { contents: read }
     steps:
       - uses: actions/checkout@v4
 
-      # Windows → install MSYS2 tool-chain, unique cache key avoids 409 conflict
+      # Windows → MSYS2 tool-chain; unique cache key avoids 409 conflict
       - uses: msys2/setup-msys2@v2
         if: runner.os == 'Windows'
         with:
-          release: false                   # unique cache key :contentReference[oaicite:1]{index=1}
+          release: false                 # per-job cache key :contentReference[oaicite:2]{index=2}
           update: true
           install: >
             gcc git make libiconv libiconv-devel
@@ -73,13 +88,15 @@ jobs:
       - name: Build (bash)
         if: runner.os != 'Windows'
         shell: bash
-        env: { SHARED: ${{ matrix.shared }} }
+        env:
+          SHARED: ${{ matrix.shared }}
         run: make -j"$(nproc)"
 
       - name: Build (msys2)
         if: runner.os == 'Windows'
         shell: msys2 {0}
-        env: { SHARED: ${{ matrix.shared }} }
+        env:
+          SHARED: ${{ matrix.shared }}
         run: make -j"$(nproc || 4)"
 
       - uses: actions/upload-artifact@v4
@@ -97,34 +114,33 @@ jobs:
             rules/
             example*
 
-################################################################################
-# 3) RELEASE – gather artefacts, create one 7z, attach to nightly tag
-################################################################################
+#-----------------------------------------------------------------------------
+# 3) RELEASE – gather artefacts → one 7-zip → nightly tag
+#-----------------------------------------------------------------------------
   release:
     needs: build
     if: always() && needs.build.result == 'success'
-    runs-on: ubuntu-22.04               # p7zip comes pre-installed :contentReference[oaicite:2]{index=2}
+    runs-on: ubuntu-22.04           # p7zip is pre-installed on this image :contentReference[oaicite:3]{index=3}
     permissions: { contents: write }
     steps:
-      # 1. Download every parts-* artefact
       - uses: actions/download-artifact@v4
 
-      # 2. Merge all content into ./bundle
-      - name: Collect all build outputs
+      - name: Collect build outputs
         run: |
           mkdir bundle
           shopt -s nullglob
-          for d in parts-*; do mv "$d"/* bundle/; rmdir "$d"; done
+          for d in parts-*; do
+            mv "$d"/* bundle/
+            rmdir "$d"
+          done
 
-      # 3. Compress bundle → hashcat-nightly.7z (max compression -mx=9)
-      - name: Create 7-Zip archive
-        run: 7z a -t7z -mx=9 hashcat-nightly.7z bundle   # 7-Zip CLI available on Linux & Windows runners :contentReference[oaicite:3]{index=3}
+      - name: Create hashcat-nightly.7z
+        run: 7z a -t7z -mx=9 hashcat-nightly.7z bundle   # CLI exists on Ubuntu & Windows runners :contentReference[oaicite:4]{index=4}
 
-      # 4. Publish single asset
       - uses: ncipollo/release-action@v1
         with:
           tag: nightly-${{ github.sha }}
           name: "Nightly build – ${{ github.sha }}"
           artifacts: hashcat-nightly.7z
           allowUpdates: true
-          generateReleaseNotes: true     # auto-notes
+          generateReleaseNotes: true
