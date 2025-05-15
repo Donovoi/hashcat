@@ -1,35 +1,31 @@
 name: Auto-Sync-Nightly
-
 on:
-  # every 30 minutes (UTC)
   schedule:
     - cron: "*/30 * * * *"
   workflow_dispatch:
+    inputs:
+      force_build:
+        description: "Force matrix build"
+        type: boolean
+        default: false
 
-# Newer run on same ref cancels the older one
+permissions:
+  contents: read
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read   # least-privilege default
-
 jobs:
-#------------------------------------------------
-# 1) SYNC  – fast-forward master from upstream
-#------------------------------------------------
   sync:
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write
+    permissions: { contents: write }
     outputs:
       changed: ${{ steps.sync.outputs.has_new_commits }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Fast-forward from hashcat/hashcat
-        id: sync
+        with: { persist-credentials: false }
+      - id: sync
+        name: Fast-forward from upstream
         uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
         with:
           upstream_sync_repo: hashcat/hashcat
@@ -37,69 +33,41 @@ jobs:
           target_sync_branch: master
           target_repo_token: ${{ secrets.PAT_PUSH }}
 
-#------------------------------------------------
-# 2) BUILD – only when new commits arrived
-#------------------------------------------------
   build:
     needs: sync
-    if: needs.sync.outputs.changed == 'true'
+    if: needs.sync.outputs.changed == 'true' ||
+        (github.event_name == 'workflow_dispatch' &&
+         github.event.inputs.force_build == 'true')
     strategy:
       fail-fast: false
       matrix:
         include:
-          # ---------- Linux ----------
-          - os: ubuntu-22.04
-            os_name: linux
-            shared: 0
-          - os: ubuntu-22.04
-            os_name: linux
-            shared: 1
-          # ---------- macOS ----------
-          - os: macos-14
-            os_name: macos
-            shared: 0
-          - os: macos-14
-            os_name: macos
-            shared: 1
-          # ---------- Windows ----------
-          - os: windows-2022
-            os_name: windows
-            shared: 0
-          - os: windows-2022
-            os_name: windows
-            shared: 1
-
+          - { os: ubuntu-22.04, os_name: linux,   shared: 0 }
+          - { os: ubuntu-22.04, os_name: linux,   shared: 1 }
+          - { os: macos-14,    os_name: macos,   shared: 0 }
+          - { os: macos-14,    os_name: macos,   shared: 1 }
+          - { os: windows-2022, os_name: windows, shared: 0 }
+          - { os: windows-2022, os_name: windows, shared: 1 }
     runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
-
+    permissions: { contents: read }
     steps:
       - uses: actions/checkout@v4
-
-      # Windows → MSYS2 tool-chain
       - uses: msys2/setup-msys2@v2
         if: runner.os == 'Windows'
         with:
           update: true
-          install: >
+          install: >-
             gcc git make libiconv libiconv-devel
-
-      # POSIX build for Linux & macOS
-      - name: Build hashcat (bash)
+      - name: Build (bash)
         if: runner.os != 'Windows'
         shell: bash
-        env:
-          SHARED: ${{ matrix.shared }}
+        env: { SHARED: ${{ matrix.shared }} }
         run: make -j"$(nproc)"
-
-      # Windows build
-      - name: Build hashcat (msys2)
+      - name: Build (msys2)
         if: runner.os == 'Windows'
         shell: msys2 {0}
-        env:
-          SHARED: ${{ matrix.shared }}
+        env: { SHARED: ${{ matrix.shared }} }
         run: make -j"$(nproc || 4)"
-
       - uses: actions/upload-artifact@v4
         with:
           name: hashcat-${{ matrix.os_name }}-${{ matrix.shared == 0 && 'static' || 'shared' }}
@@ -115,15 +83,11 @@ jobs:
             rules/
             example*
 
-#------------------------------------------------
-# 3) RELEASE – nightly tag with fresh binaries
-#------------------------------------------------
   release:
     needs: build
-    if: needs.sync.outputs.changed == 'true'
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write
+    if: always() && needs.build.result == 'success'
+    permissions: { contents: write }
     steps:
       - uses: actions/download-artifact@v4
       - name: Publish nightly release
