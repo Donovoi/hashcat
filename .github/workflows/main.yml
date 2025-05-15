@@ -2,7 +2,7 @@ name: Auto-Sync-Nightly
 
 on:
   schedule:
-    - cron: "*/30 * * * *"            # every 30 min UTC
+    - cron: "*/30 * * * *"         # every 30 min UTC
   workflow_dispatch:
     inputs:
       force_build:
@@ -11,26 +11,30 @@ on:
         default: false
 
 permissions:
-  contents: read                      # default; jobs elevate as needed
+  contents: read                   # least-privilege default
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true            # 
+  cancel-in-progress: true
 
 jobs:
-##############################################################################
+###############################################################################
 # 1) SYNC – fast-forward fork from upstream
-##############################################################################
+###############################################################################
   sync:
     runs-on: ubuntu-22.04
-    permissions: { contents: write }
+    permissions:
+      contents: write              # needed for PAT push
     outputs:
       changed: ${{ steps.sync.outputs.has_new_commits }}
     steps:
-      - uses: actions/checkout@v4
-        with: { persist-credentials: false }
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - id: sync
+        name: Fast-forward from upstream
         uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
         with:
           upstream_sync_repo: hashcat/hashcat
@@ -38,9 +42,9 @@ jobs:
           target_sync_branch: master
           target_repo_token: ${{ secrets.PAT_PUSH }}
 
-##############################################################################
-# 2) BUILD – Linux / macOS / Windows × static|shared
-##############################################################################
+###############################################################################
+# 2) BUILD – Linux / macOS / Windows  ×  static | shared
+###############################################################################
   build:
     needs: sync
     if: needs.sync.outputs.changed == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.force_build == 'true')
@@ -48,21 +52,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux
+          # ---------- Linux ----------
           - os: ubuntu-22.04
             os_name: linux
             shared: 0
           - os: ubuntu-22.04
             os_name: linux
             shared: 1
-          # macOS
+          # ---------- macOS ----------
           - os: macos-14
             os_name: macos
             shared: 0
           - os: macos-14
             os_name: macos
             shared: 1
-          # Windows
+          # ---------- Windows ----------
           - os: windows-2022
             os_name: windows
             shared: 0
@@ -71,42 +75,47 @@ jobs:
             shared: 1
 
     runs-on: ${{ matrix.os }}
-    permissions: { contents: read }
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # Windows → MSYS2 tool-chain (unique cache)
-      - uses: msys2/setup-msys2@v2
+      # ---- Windows: install MSYS2 tool-chain (unique cache) ----
+      - name: Set up MSYS2
         if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
         with:
-          release: false               # avoids 409 cache conflict 
+          release: false           # avoids 409 cache-key clash
           update: true
           install: >
             gcc git make libiconv libiconv-devel
 
-      # ---------- Build on POSIX hosts ----------
+      # ---- Build on POSIX hosts ----
       - name: Build (bash)
         if: runner.os != 'Windows'
         shell: bash
-        env: { SHARED: ${{ matrix.shared }} }
+        env:
+          SHARED: ${{ matrix.shared }}
         run: |
           make -j"$(nproc)"
-          # compatibility names for legacy tools
+          # legacy binary names for older launchers
           ln -sf hashcat hashcat.bin
-          ln -sf hashcat hashcat64.bin       # Hashtopolis <=0.7 looks for this 
+          ln -sf hashcat hashcat64.bin
 
-      # ---------- Build on Windows ----------
+      # ---- Build on Windows ----
       - name: Build (msys2)
         if: runner.os == 'Windows'
         shell: msys2 {0}
-        env: { SHARED: ${{ matrix.shared }} }
+        env:
+          SHARED: ${{ matrix.shared }}
         run: |
           make -j"$(nproc || 4)"
-          cp hashcat.exe hashcat64.exe       # legacy launcher name
-          cp hashcat.exe hashcat.bin         # some scripts expect this
+          cp hashcat.exe hashcat64.exe
+          cp hashcat.exe hashcat.bin
 
-      # Upload artefact
-      - uses: actions/upload-artifact@v4
+      - name: Upload artefact
+        uses: actions/upload-artifact@v4
         with:
           name: parts-${{ matrix.os_name }}-${{ matrix.shared }}
           path: |
@@ -121,32 +130,35 @@ jobs:
             rules/
             example*
 
-##############################################################################
+###############################################################################
 # 3) RELEASE – merge artefacts → one hashcat.7z
-##############################################################################
+###############################################################################
   release:
     needs: build
     if: always() && needs.build.result == 'success'
-    runs-on: ubuntu-22.04              # p7zip is pre-installed 
-    permissions: { contents: write }
+    runs-on: ubuntu-22.04           # p7zip pre-installed
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download all artefacts
+        uses: actions/download-artifact@v4
 
       - name: Merge artefacts (overwrite duplicates)
         run: |
           shopt -s nullglob
           for d in parts-*; do
-            rsync -a "$d"/ ./          # overwrite duplicates
+            rsync -a "$d"/ ./      # later artefacts overwrite earlier ones
             rm -rf "$d"
           done
 
       - name: Create hashcat.7z
         run: 7z a -t7z -mx=9 hashcat.7z ./*
 
-      - uses: ncipollo/release-action@v1
+      - name: Publish / Update release
+        uses: ncipollo/release-action@v1
         with:
           tag: Hashcat-Latest
-          name: "Hashcat-Latest"
+          name: Hashcat-Latest
           artifacts: hashcat.7z
           allowUpdates: true
-          generateReleaseNotes: true   # release-action docs 
+          generateReleaseNotes: true
