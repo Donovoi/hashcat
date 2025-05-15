@@ -11,7 +11,7 @@ on:
         default: false
 
 permissions:
-  contents: read
+  contents: read                     # least-privilege default
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -24,7 +24,7 @@ jobs:
   sync:
     runs-on: ubuntu-22.04
     permissions:
-      contents: write
+      contents: write                # PAT push
     outputs:
       changed: "${{ steps.sync.outputs.has_new_commits }}"
     steps:
@@ -43,7 +43,7 @@ jobs:
           target_repo_token: "${{ secrets.PAT_PUSH }}"
 
 ###############################################################################
-# 2) BUILD – Linux / macOS / Windows × static | shared
+# 2) BUILD – Linux / macOS / Windows  ×  static | shared
 ###############################################################################
   build:
     needs: sync
@@ -55,15 +55,27 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ---------- Linux ----------
-          - os: ubuntu-22.04   ; os_name: linux   ; shared: 0 ; shell: bash
-          - os: ubuntu-22.04   ; os_name: linux   ; shared: 1 ; shell: bash
-          # ---------- macOS ----------
-          - os: macos-14       ; os_name: macos   ; shared: 0 ; shell: bash
-          - os: macos-14       ; os_name: macos   ; shared: 1 ; shell: bash
-          # ---------- Windows ----------
-          - os: windows-2022   ; os_name: windows ; shared: 0 ; shell: "msys2 {0}"
-          - os: windows-2022   ; os_name: windows ; shared: 1 ; shell: "msys2 {0}"
+          # -------- Linux --------
+          - os: ubuntu-22.04
+            os_name: linux
+            shared: 0
+          - os: ubuntu-22.04
+            os_name: linux
+            shared: 1
+          # -------- macOS --------
+          - os: macos-14
+            os_name: macos
+            shared: 0
+          - os: macos-14
+            os_name: macos
+            shared: 1
+          # -------- Windows ------
+          - os: windows-2022
+            os_name: windows
+            shared: 0
+          - os: windows-2022
+            os_name: windows
+            shared: 1
 
     runs-on: "${{ matrix.os }}"
     permissions:
@@ -82,15 +94,24 @@ jobs:
           install: >
             gcc git make libiconv libiconv-devel
 
-      # ---------- Build ----------
-      - name: Make hashcat
-        shell: "${{ matrix.shell }}"
+      # ---------- Build on Linux / macOS ----------
+      - name: Build (POSIX)
+        if: matrix.os_name != 'windows'
+        shell: bash
         env:
           SHARED: "${{ matrix.shared }}"
-        run: make -j"$(nproc || sysctl -n hw.ncpu || 4)"
+        run: make -j"$(nproc)"
+
+      # ---------- Build on Windows ----------
+      - name: Build (Windows-MSYS2)
+        if: matrix.os_name == 'windows'
+        shell: msys2 {0}
+        env:
+          SHARED: "${{ matrix.shared }}"
+        run: make -j"$(nproc || 4)"
 
       # ---------- Arrange binaries ----------
-      - name: Legacy names / isolate macOS
+      - name: Add legacy names / isolate macOS
         shell: bash
         run: |
           set -e
@@ -134,7 +155,7 @@ jobs:
   release:
     needs: build
     if: always() && needs.build.result == 'success'
-    runs-on: ubuntu-22.04           # p7zip pre-installed
+    runs-on: ubuntu-22.04            # p7zip pre-installed
     permissions:
       contents: write
     steps:
