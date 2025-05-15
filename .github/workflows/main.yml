@@ -120,6 +120,8 @@ jobs:
               chmod a+x hashcat
               cp hashcat hashcat.bin
               cp hashcat hashcat64.bin
+              ln -sf libhashcat.so.6.2.6 libhashcat.so.6
+              ln -sf libhashcat.so.6      libhashcat.so
               ;;
             macos)
               mkdir -p macos
