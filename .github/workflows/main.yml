@@ -1,53 +1,47 @@
+# .github/workflows/main.yml
 name: Auto-Sync-Nightly
 
 on:
-  schedule:
-    - cron: "*/30 * * * *"          # every 30 min UTC
+  schedule: [{ cron: '*/30 * * * *' }]         # every 30 min
   workflow_dispatch:
     inputs:
       force_build:
-        description: "Run full build even if upstream unchanged"
+        description: 'Run full build even if upstream unchanged'
         type: boolean
         default: false
 
-permissions:
-  contents: read                     # least-privilege default
-
+permissions: { contents: read }                # default – least privilege
 concurrency:
-  group: "${{ github.workflow }}-${{ github.ref }}"
+  group: '${{ github.workflow }}-${{ github.ref }}'
   cancel-in-progress: true
 
 jobs:
 ###############################################################################
-# 1) SYNC – fast-forward fork/master from upstream
+# 1) SYNC – keep our fork up-to-date
 ###############################################################################
   sync:
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write                # PAT push
+    permissions: { contents: write }
     outputs:
-      changed: "${{ steps.sync.outputs.has_new_commits }}"
+      changed: ${{ steps.sync.outputs.has_new_commits }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
 
       - id: sync
-        name: Fast-forward from upstream
         uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
         with:
           upstream_sync_repo: hashcat/hashcat
           upstream_sync_branch: master
           target_sync_branch: master
-          target_repo_token: "${{ secrets.PAT_PUSH }}"
+          target_repo_token: ${{ secrets.PAT_PUSH }}
 
 ###############################################################################
-# 2) BUILD – Linux / macOS / Windows  ×  static | shared
+# 2) BUILD – Linux|macOS|Windows  ×  static|shared
 ###############################################################################
   build:
     needs: sync
-    if: >
+    if: >-
       needs.sync.outputs.changed == 'true' ||
       (github.event_name == 'workflow_dispatch' &&
        github.event.inputs.force_build == 'true')
@@ -55,125 +49,80 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # -------- Linux --------
-          - os: ubuntu-22.04
-            os_name: linux
-            shared: 0
-          - os: ubuntu-22.04
-            os_name: linux
-            shared: 1
-          # -------- macOS --------
-          - os: macos-14
-            os_name: macos
-            shared: 0
-          - os: macos-14
-            os_name: macos
-            shared: 1
-          # -------- Windows ------
-          - os: windows-2022
-            os_name: windows
-            shared: 0
-          - os: windows-2022
-            os_name: windows
-            shared: 1
+          # ---------- Linux (static only – we’ll use this for .bin) ----------
+          - { os: ubuntu-22.04 , os_name: linux  , shared: 0 }
+          # ---------- macOS (shared build lives under macOS/ ) --------------
+          - { os: macos-14     , os_name: macos  , shared: 1 }
+          # ---------- Windows (shared build; .exe is always self-contained) --
+          - { os: windows-2022 , os_name: windows, shared: 1 , shell: 'msys2 {0}' }
 
-    runs-on: "${{ matrix.os }}"
-    permissions:
-      contents: read
+    runs-on: ${{ matrix.os }}
+    permissions: { contents: read }
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # ---------- Windows tool-chain ----------
-      - name: Set up MSYS2
+      # ---- Windows tool-chain ------------------------------------------------
+      - name: Set up MSYS2 (Windows only)
         if: matrix.os_name == 'windows'
         uses: msys2/setup-msys2@v2
         with:
           release: false
           update: true
-          install: >
+          install: >-
             gcc git make libiconv libiconv-devel
 
-      # ---------- Build on Linux / macOS ----------
-      - name: Build (POSIX)
-        if: matrix.os_name != 'windows'
-        shell: bash
-        env:
-          SHARED: "${{ matrix.shared }}"
-        run: make -j"$(nproc)"
+      # ---- Compile ----------------------------------------------------------
+      - name: make
+        shell: ${{ matrix.shell || 'bash' }}
+        env: { SHARED: ${{ matrix.shared }} }
+        run: make -j"$(nproc || sysctl -n hw.ncpu || 4)"
 
-      # ---------- Build on Windows ----------
-      - name: Build (Windows-MSYS2)
-        if: matrix.os_name == 'windows'
-        shell: msys2 {0}
-        env:
-          SHARED: "${{ matrix.shared }}"
-        run: make -j"$(nproc || 4)"
-
-      # ---------- Arrange binaries ----------
-      - name: Add legacy names / isolate macOS
+      # ---- Arrange artefacts -------------------------------------------------
+      - name: Legacy names / macOS sub-dir
         shell: bash
         run: |
           set -e
-          case "${{ matrix.os_name }}" in
-            linux)
-              chmod a+x hashcat
-              cp hashcat hashcat.bin
-              cp hashcat hashcat64.bin
-              ln -sf libhashcat.so.6.2.6 libhashcat.so.6
-              ln -sf libhashcat.so.6      libhashcat.so
-              ;;
-            macos)
-              mkdir -p macos
-              mv hashcat* macos/
-              mv libhashcat*.dylib macos/ 2>/dev/null || true
-              ;;
-            windows)
-              cp hashcat.exe hashcat64.exe
-              ;;
-          esac
+          if [[ "${{ matrix.os_name }}" == linux ]]; then
+            chmod 0755 hashcat
+            for n in hashcat.bin hashcat64.bin; do cp --preserve=mode hashcat "$n"; done
+          elif [[ "${{ matrix.os_name }}" == macos ]]; then
+            mkdir -p macos && mv hashcat* libhashcat*.dylib macos/
+          else  # windows
+            cp hashcat.exe hashcat64.exe
+          fi
 
-      # ---------- Upload artefact ----------
-      - name: Upload artefact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: "parts-${{ matrix.os_name }}-${{ matrix.shared }}"
+          name: parts-${{ matrix.os_name }}
           path: |
             hashcat*
             libhashcat*
             macos/
-            charsets/
-            docs/
-            extra/
-            layouts/
-            masks/
-            modules/
-            rules/
-            example*
+            charsets/ docs/ extra/ layouts/ masks/ modules/ rules/ example*
 
 ###############################################################################
-# 3) RELEASE – merge artefacts → single hashcat.7z
+# 3) RELEASE – tar first ➜ then 7-Zip  (keeps execute bits!)
 ###############################################################################
   release:
     needs: build
     if: always() && needs.build.result == 'success'
-    runs-on: ubuntu-22.04            # p7zip pre-installed
-    permissions:
-      contents: write
+    runs-on: ubuntu-22.04
+    permissions: { contents: write }
     steps:
-      - name: Download artefacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
 
-      - name: Merge artefacts
+      - name: Merge build outputs
         run: |
           shopt -s nullglob
-          for d in parts-*; do
-            rsync -a "$d"/ ./      # later artefacts overwrite earlier
-            rm -rf "$d"
-          done
+          for d in parts-*; do rsync -a "$d"/ ./ && rm -rf "$d"; done
 
+      # 🟢 1. pack everything into a tarball (preserves modes)
+      - name: Create tarball
+        run: tar --owner=0 --group=0 -cf hashcat.tar .
+
+      # 🟢 2. compress the tarball with 7-Zip (safe for old p7zip 9.20)
       - name: Create hashcat.7z
-        run: 7z a -t7z -mx=9 hashcat.7z ./*
+        run: 7z a -mx=9 -mmt=on hashcat.7z hashcat.tar
 
       - name: Publish / update release
         uses: ncipollo/release-action@v1
