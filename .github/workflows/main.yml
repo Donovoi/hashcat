@@ -129,25 +129,25 @@ jobs:
     runs-on: ubuntu-22.04          # p7zip is pre-installed
     permissions:
       contents: write
-    steps:
-      - uses: actions/download-artifact@v4
+  steps:
+    - uses: actions/download-artifact@v4
 
-      - name: Merge artefacts (overwrite duplicates)
-        run: |
-          mkdir -p bundle
-          shopt -s nullglob
-          for d in parts-*; do
-            rsync -a "$d"/ bundle/      # later artefacts overwrite earlier ones
-            rm -rf "$d"
-          done
+    # merge parts-* → workspace root, overwriting duplicates
+    - name: Merge artefacts
+      run: |
+        shopt -s nullglob
+        for d in parts-*; do
+          rsync -a "$d"/ ./          # copy into root
+          rm -rf "$d"
+        done
 
-      - name: Create hashcat-nightly.7z
-        run: 7z a -t7z -mx=9 hashcat-nightly.7z bundle
+    - name: Create hashcat-nightly.7z
+      run: 7z a -t7z -mx=9 hashcat-nightly.7z ./*
 
-      - uses: ncipollo/release-action@v1
-        with:
-          tag: nightly-${{ github.sha }}
-          name: "Nightly build – ${{ github.sha }}"
-          artifacts: hashcat-nightly.7z
-          allowUpdates: true
-          generateReleaseNotes: true
+    - uses: ncipollo/release-action@v1
+      with:
+        tag: nightly-${{ github.sha }}
+        name: "Nightly build – ${{ github.sha }}"
+        artifacts: hashcat-nightly.7z
+        allowUpdates: true
+        generateReleaseNotes: true
