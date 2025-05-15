@@ -1,0 +1,97 @@
+name: Sync-Build-Release
+
+on:
+  schedule:
+    # run every 30 min — tune as you like
+    - cron: '*/30 * * * *'
+  # allow manual runs
+  workflow_dispatch:
+
+permissions:
+  contents: write          # needed for PAT-driven push & release
+  actions: write           # allows the build to trigger downstream jobs
+
+jobs:
+  ## ---------- 1) Sync from upstream ---------- ##
+  sync:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.sync.outputs.has_new_commits }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false       # we’ll push with PAT instead
+      - name: Fast-forward from hashcat/hashcat
+        id: sync
+        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
+        with:
+          upstream_sync_repo: hashcat/hashcat   # <- upstream
+          upstream_sync_branch: master
+          target_sync_branch: master            # <- your default branch
+          target_repo_token: ${{ secrets.PAT_PUSH }}
+
+  ## ---------- 2) Build only if new commits ---------- ##
+  build:
+    needs: sync
+    if: needs.sync.outputs.changed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        shared: [0, 1]
+        include:
+          - os: ubuntu-latest   # labels for artifacts
+            os_name: linux
+          - os: macos-latest
+            os_name: macos
+          - os: windows-latest
+            os_name: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      # ---------- (optional) Windows build prerequisites ----------
+      - name: Set up MSYS2 on Windows
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: |
+            gcc git libiconv libiconv-devel make
+      # ---------- Build ----------
+      - name: make
+        env:
+          SHARED: ${{ matrix.shared }}
+        shell: ${{ runner.os == 'Windows' && 'msys2 {0}' || 'bash' }}
+        run: make
+      # ---------- collect artifacts ----------
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hashcat-${{ matrix.os_name }}-${{ matrix.shared == 0 && 'static' || 'shared' }}
+          path: |
+            charsets/
+            docs/
+            extra/
+            layouts/
+            masks/
+            modules/
+            OpenCL/
+            rules/
+            example*
+            hashcat*
+            libhashcat*
+
+  ## ---------- 3) Draft / update a GitHub Release ---------- ##
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: needs.sync.outputs.changed == 'true'
+    steps:
+      - uses: actions/download-artifact@v4
+      - name: Publish GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: auto-${{ github.sha }}
+          name: "Nightly build – ${{ github.sha }}"
+          artifacts: "**/hashcat-*"
+          allowUpdates: true           # append if tag already exists
+          token: ${{ secrets.PAT_PUSH }}
