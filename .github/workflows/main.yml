@@ -6,12 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       force_build:
-        description: Run full build even if upstream unchanged
+        description: "Run full build even if upstream unchanged"
         type: boolean
         default: false
 
 permissions:
-  contents: read                    # least-privilege default
+  contents: read
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -56,26 +56,14 @@ jobs:
       matrix:
         include:
           # ---------- Linux ----------
-          - os: ubuntu-22.04
-            os_name: linux
-            shared: 0
-          - os: ubuntu-22.04
-            os_name: linux
-            shared: 1
+          - os: ubuntu-22.04   ; os_name: linux   ; shared: 0 ; shell: bash
+          - os: ubuntu-22.04   ; os_name: linux   ; shared: 1 ; shell: bash
           # ---------- macOS ----------
-          - os: macos-14
-            os_name: macos
-            shared: 0
-          - os: macos-14
-            os_name: macos
-            shared: 1
+          - os: macos-14       ; os_name: macos   ; shared: 0 ; shell: bash
+          - os: macos-14       ; os_name: macos   ; shared: 1 ; shell: bash
           # ---------- Windows ----------
-          - os: windows-2022
-            os_name: windows
-            shared: 0
-          - os: windows-2022
-            os_name: windows
-            shared: 1
+          - os: windows-2022   ; os_name: windows ; shared: 0 ; shell: "msys2 {0}"
+          - os: windows-2022   ; os_name: windows ; shared: 1 ; shell: "msys2 {0}"
 
     runs-on: "${{ matrix.os }}"
     permissions:
@@ -86,37 +74,41 @@ jobs:
 
       # ---------- Windows tool-chain ----------
       - name: Set up MSYS2
-        if: runner.os == 'Windows'
+        if: matrix.os_name == 'windows'
         uses: msys2/setup-msys2@v2
         with:
-          release: false        # avoids cache-key clashes
+          release: false
           update: true
           install: >
             gcc git make libiconv libiconv-devel
 
       # ---------- Build ----------
-      - name: Build hashcat
-        shell: ${{ runner.os == 'Windows' && 'msys2 {0}' || 'bash' }}
+      - name: Make hashcat
+        shell: "${{ matrix.shell }}"
         env:
           SHARED: "${{ matrix.shared }}"
         run: make -j"$(nproc || sysctl -n hw.ncpu || 4)"
 
       # ---------- Arrange binaries ----------
-      - name: Add legacy names / isolate macOS
+      - name: Legacy names / isolate macOS
         shell: bash
         run: |
           set -e
-          if [[ "${{ matrix.os_name }}" == "linux" ]]; then
-            chmod a+x hashcat
-            cp hashcat hashcat.bin
-            cp hashcat hashcat64.bin
-          elif [[ "${{ matrix.os_name }}" == "macos" ]]; then
-            mkdir -p macos
-            mv hashcat* macos/
-            mv libhashcat*.dylib macos/ 2>/dev/null || true
-          else   # windows
-            cp hashcat.exe hashcat64.exe
-          fi
+          case "${{ matrix.os_name }}" in
+            linux)
+              chmod a+x hashcat
+              cp hashcat hashcat.bin
+              cp hashcat hashcat64.bin
+              ;;
+            macos)
+              mkdir -p macos
+              mv hashcat* macos/
+              mv libhashcat*.dylib macos/ 2>/dev/null || true
+              ;;
+            windows)
+              cp hashcat.exe hashcat64.exe
+              ;;
+          esac
 
       # ---------- Upload artefact ----------
       - name: Upload artefact
