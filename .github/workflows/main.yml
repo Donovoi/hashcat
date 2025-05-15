@@ -2,35 +2,33 @@ name: Auto-Sync-Nightly
 
 on:
   schedule:
-    - cron: "*/30 * * * *"        # every 30 min (UTC)
+    - cron: "*/30 * * * *"               # every 30 min (UTC)
   workflow_dispatch:
     inputs:
       force_build:
-        description: "Run full build even when no upstream commits"
+        description: "Run full build even if upstream unchanged"
         type: boolean
         default: false
 
 permissions:
-  contents: read
+  contents: read                         # default; release job elevates
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+################################################################################
+# 1) SYNC – fast-forward fork/master from upstream master
+################################################################################
 jobs:
-# -------------------------------------------------
-# 1) SYNC  – fast-forward master from upstream repo
-# -------------------------------------------------
   sync:
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write
+    permissions: { contents: write }     # push with PAT
     outputs:
       changed: ${{ steps.sync.outputs.has_new_commits }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
+        with: { persist-credentials: false }
       - id: sync
         name: Fast-forward from upstream
         uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
@@ -40,70 +38,53 @@ jobs:
           target_sync_branch: master
           target_repo_token: ${{ secrets.PAT_PUSH }}
 
-# -------------------------------------------------
-# 2) BUILD – matrix runs only when condition is met
-# -------------------------------------------------
+################################################################################
+# 2) BUILD – compile on six OS/variant combos, upload artefacts as parts-*
+################################################################################
   build:
     needs: sync
-    if: needs.sync.outputs.changed == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.force_build == 'true')
+    if: needs.sync.outputs.changed == 'true' ||
+        (github.event_name == 'workflow_dispatch' &&
+         github.event.inputs.force_build == 'true')
     strategy:
       fail-fast: false
       matrix:
         include:
-          # ---------- Linux ----------
-          - os: ubuntu-22.04
-            os_name: linux
-            shared: 0
-          - os: ubuntu-22.04
-            os_name: linux
-            shared: 1
-          # ---------- macOS ----------
-          - os: macos-14
-            os_name: macos
-            shared: 0
-          - os: macos-14
-            os_name: macos
-            shared: 1
-          # ---------- Windows ----------
-          - os: windows-2022
-            os_name: windows
-            shared: 0
-          - os: windows-2022
-            os_name: windows
-            shared: 1
+          - os: ubuntu-22.04  ; os_name: linux   ; shared: 0
+          - os: ubuntu-22.04  ; os_name: linux   ; shared: 1
+          - os: macos-14      ; os_name: macos   ; shared: 0
+          - os: macos-14      ; os_name: macos   ; shared: 1
+          - os: windows-2022  ; os_name: windows ; shared: 0
+          - os: windows-2022  ; os_name: windows ; shared: 1
     runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
+    permissions: { contents: read }
     steps:
       - uses: actions/checkout@v4
 
-      # Windows → MSYS2 tool-chain
+      # Windows → install MSYS2 tool-chain, unique cache key avoids 409 conflict
       - uses: msys2/setup-msys2@v2
         if: runner.os == 'Windows'
         with:
+          release: false                   # unique cache key :contentReference[oaicite:1]{index=1}
           update: true
           install: >
             gcc git make libiconv libiconv-devel
 
-      # Build for POSIX hosts
       - name: Build (bash)
         if: runner.os != 'Windows'
         shell: bash
-        env:
-          SHARED: ${{ matrix.shared }}
+        env: { SHARED: ${{ matrix.shared }} }
         run: make -j"$(nproc)"
 
-      # Build for Windows hosts
       - name: Build (msys2)
         if: runner.os == 'Windows'
         shell: msys2 {0}
-        env:
-          SHARED: ${{ matrix.shared }}
+        env: { SHARED: ${{ matrix.shared }} }
         run: make -j"$(nproc || 4)"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: hashcat-${{ matrix.os_name }}-${{ matrix.shared == 0 && 'static' || 'shared' }}
+          name: parts-${{ matrix.os_name }}-${{ matrix.shared }}
           path: |
             hashcat*
             libhashcat*
@@ -116,21 +97,34 @@ jobs:
             rules/
             example*
 
-# -------------------------------------------------
-# 3) RELEASE – nightly tag with fresh binaries
-# -------------------------------------------------
+################################################################################
+# 3) RELEASE – gather artefacts, create one 7z, attach to nightly tag
+################################################################################
   release:
     needs: build
     if: always() && needs.build.result == 'success'
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: write         # <- crucial
+    runs-on: ubuntu-22.04               # p7zip comes pre-installed :contentReference[oaicite:2]{index=2}
+    permissions: { contents: write }
     steps:
+      # 1. Download every parts-* artefact
       - uses: actions/download-artifact@v4
+
+      # 2. Merge all content into ./bundle
+      - name: Collect all build outputs
+        run: |
+          mkdir bundle
+          shopt -s nullglob
+          for d in parts-*; do mv "$d"/* bundle/; rmdir "$d"; done
+
+      # 3. Compress bundle → hashcat-nightly.7z (max compression -mx=9)
+      - name: Create 7-Zip archive
+        run: 7z a -t7z -mx=9 hashcat-nightly.7z bundle   # 7-Zip CLI available on Linux & Windows runners :contentReference[oaicite:3]{index=3}
+
+      # 4. Publish single asset
       - uses: ncipollo/release-action@v1
         with:
           tag: nightly-${{ github.sha }}
           name: "Nightly build – ${{ github.sha }}"
-          artifacts: "**/hashcat-*"
-          generateReleaseNotes: true
+          artifacts: hashcat-nightly.7z
           allowUpdates: true
+          generateReleaseNotes: true     # auto-notes
