@@ -2,7 +2,7 @@ name: Auto-Sync-Nightly
 
 on:
   schedule:
-    - cron: "*/30 * * * *"           # every 30 min UTC
+    - cron: "*/30 * * * *"            # every 30 min UTC
   workflow_dispatch:
     inputs:
       force_build:
@@ -10,8 +10,7 @@ on:
         type: boolean
         default: false
 
-permissions:
-  contents: read                     # least-privilege default
+permissions: { contents: read }       # least-privilege default
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,18 +22,14 @@ jobs:
 ###############################################################################
   sync:
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write
+    permissions: { contents: write }
     outputs:
       changed: ${{ steps.sync.outputs.has_new_commits }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
 
       - id: sync
-        name: Fast-forward from upstream
         uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
         with:
           upstream_sync_repo: hashcat/hashcat
@@ -43,7 +38,7 @@ jobs:
           target_repo_token: ${{ secrets.PAT_PUSH }}
 
 ###############################################################################
-# 2) BUILD – Linux / macOS / Windows × static|shared
+# 2) BUILD – Linux / macOS / Windows  ×  static | shared
 ###############################################################################
   build:
     needs: sync
@@ -53,73 +48,65 @@ jobs:
       matrix:
         include:
           # ---------- Linux ----------
-          - os: ubuntu-22.04
-            os_name: linux
-            shared: 0
-          - os: ubuntu-22.04
-            os_name: linux
-            shared: 1
+          - { os: ubuntu-22.04 , os_name: linux  , shared: 0 }
+          - { os: ubuntu-22.04 , os_name: linux  , shared: 1 }
           # ---------- macOS ----------
-          - os: macos-14
-            os_name: macos
-            shared: 0
-          - os: macos-14
-            os_name: macos
-            shared: 1
+          - { os: macos-14     , os_name: macos  , shared: 0 }
+          - { os: macos-14     , os_name: macos  , shared: 1 }
           # ---------- Windows ----------
-          - os: windows-2022
-            os_name: windows
-            shared: 0
-          - os: windows-2022
-            os_name: windows
-            shared: 1
+          - { os: windows-2022 , os_name: windows, shared: 0 }
+          - { os: windows-2022 , os_name: windows, shared: 1 }
 
     runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
+    permissions: { contents: read }
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # ---- Windows: install MSYS2 tool-chain (unique cache key) ----
+      # ---- Windows: MSYS2 tool-chain (unique cache key) ----
       - name: Set up MSYS2
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
         with:
-          release: false          # avoids 409 cache conflict 
+          release: false
           update: true
           install: >
             gcc git make libiconv libiconv-devel
 
-      # ---- Build on POSIX hosts ----
-      - name: Build (bash)
-        if: runner.os != 'Windows'
-        shell: bash
-        env:
-          SHARED: ${{ matrix.shared }}
-        run: |
-          make -j"$(nproc)"                    # build first
-          chmod a+x hashcat                    # keep exec bit
-          cp hashcat hashcat.bin               # real copies (not symlinks)
-          cp hashcat hashcat64.bin
+      # ---- Make on all POSIX hosts or MSYS2 ----
+      - name: Build Hashcat
+        shell: ${{ runner.os == 'Windows' && 'msys2 {0}' || 'bash' }}
+        env: { SHARED: ${{ matrix.shared }} }
+        run: make -j"$(nproc || sysctl -n hw.ncpu || 4)"
 
-      # ---- Build on Windows ----
-      - name: Build (msys2)
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        env:
-          SHARED: ${{ matrix.shared }}
+      # ---- Post-build: add legacy names / move macOS out of root ----
+      - name: Arrange binaries
+        shell: ${{ runner.os == 'Windows' && 'msys2 {0}' || 'bash' }}
         run: |
-          make -j"$(nproc || 4)"
-          cp hashcat.exe hashcat64.exe
+          set -e
+          case "${{ matrix.os_name }}" in
+            linux)
+              chmod a+x hashcat
+              cp hashcat hashcat.bin
+              cp hashcat hashcat64.bin
+              ;;
+            macos)
+              mkdir -p macos
+              mv hashcat* macos/
+              mv libhashcat*.dylib macos/ || true
+              ;;
+            windows)
+              cp hashcat.exe hashcat64.exe
+              ;;
+          esac
 
-      - name: Upload artefact
-        uses: actions/upload-artifact@v4
+      # ---- Upload artefact ----
+      - uses: actions/upload-artifact@v4
         with:
           name: parts-${{ matrix.os_name }}-${{ matrix.shared }}
           path: |
             hashcat*
             libhashcat*
+            macos/
             charsets/
             docs/
             extra/
@@ -130,23 +117,21 @@ jobs:
             example*
 
 ###############################################################################
-# 3) RELEASE – merge artefacts → one hashcat.7z
+# 3) RELEASE – merge artefacts → single hashcat.7z
 ###############################################################################
   release:
     needs: build
     if: always() && needs.build.result == 'success'
-    runs-on: ubuntu-22.04            # p7zip pre-installed
-    permissions:
-      contents: write
+    runs-on: ubuntu-22.04             # p7zip pre-installed
+    permissions: { contents: write }
     steps:
-      - name: Download artefacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
 
-      - name: Merge artefacts (overwrite duplicates)
+      - name: Merge artefacts (Linux + Windows in root; macOS already isolated)
         run: |
           shopt -s nullglob
           for d in parts-*; do
-            rsync -a "$d"/ ./       # later artefacts win
+            rsync -a "$d"/ ./      # later artefacts overwrite earlier duplicates
             rm -rf "$d"
           done
 
