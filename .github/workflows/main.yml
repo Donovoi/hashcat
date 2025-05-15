@@ -2,7 +2,7 @@ name: Auto-Sync-Nightly
 
 on:
   schedule:
-    - cron: "*/30 * * * *"       # every 30 min UTC
+    - cron: "*/30 * * * *"      # every 30 min UTC
   workflow_dispatch:
     inputs:
       force_build:
@@ -11,26 +11,25 @@ on:
         default: false
 
 permissions:
-  contents: read                 # least-privilege default
+  contents: read                # least-privilege default
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-###############################################################################
+##############################################################################
 # 1) SYNC – fast-forward fork/master from upstream master
-###############################################################################
+##############################################################################
   sync:
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write            # needed for PAT push
+    permissions: { contents: write }
     outputs:
       changed: ${{ steps.sync.outputs.has_new_commits }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
+        with: { persist-credentials: false }
+
       - id: sync
         uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
         with:
@@ -39,9 +38,9 @@ jobs:
           target_sync_branch: master
           target_repo_token: ${{ secrets.PAT_PUSH }}
 
-###############################################################################
-# 2) BUILD – compile on six OS/variant combos, upload artefacts
-###############################################################################
+##############################################################################
+# 2) BUILD – six OS/variant combos, upload artefacts as parts-*
+##############################################################################
   build:
     needs: sync
     if: needs.sync.outputs.changed == 'true' ||
@@ -74,13 +73,11 @@ jobs:
             shared: 1
 
     runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
-
+    permissions: { contents: read }
     steps:
       - uses: actions/checkout@v4
 
-      # Windows – MSYS2 tool-chain with unique cache key
+      # Windows → MSYS2 tool-chain with unique cache key
       - uses: msys2/setup-msys2@v2
         if: runner.os == 'Windows'
         with:
@@ -93,16 +90,14 @@ jobs:
       - name: Build (bash)
         if: runner.os != 'Windows'
         shell: bash
-        env:
-          SHARED: ${{ matrix.shared }}
+        env: { SHARED: ${{ matrix.shared }} }
         run: make -j"$(nproc)"
 
       # Build on Windows
       - name: Build (msys2)
         if: runner.os == 'Windows'
         shell: msys2 {0}
-        env:
-          SHARED: ${{ matrix.shared }}
+        env: { SHARED: ${{ matrix.shared }} }
         run: make -j"$(nproc || 4)"
 
       - uses: actions/upload-artifact@v4
@@ -120,34 +115,32 @@ jobs:
             rules/
             example*
 
-###############################################################################
-# 3) RELEASE – merge artefacts, create single 7-Zip, publish nightly tag
-###############################################################################
+##############################################################################
+# 3) RELEASE – merge artefacts → one 7-Zip → nightly tag
+##############################################################################
   release:
     needs: build
     if: always() && needs.build.result == 'success'
-    runs-on: ubuntu-22.04          # p7zip is pre-installed
-    permissions:
-      contents: write
-  steps:
-    - uses: actions/download-artifact@v4
+    runs-on: ubuntu-22.04        # p7zip is pre-installed
+    permissions: { contents: write }
+    steps:
+      - uses: actions/download-artifact@v4
 
-    # merge parts-* → workspace root, overwriting duplicates
-    - name: Merge artefacts
-      run: |
-        shopt -s nullglob
-        for d in parts-*; do
-          rsync -a "$d"/ ./          # copy into root
-          rm -rf "$d"
-        done
+      - name: Merge artefacts (overwrite duplicates)
+        run: |
+          shopt -s nullglob
+          for d in parts-*; do
+            rsync -a "$d"/ ./       # later artefacts overwrite earlier ones
+            rm -rf "$d"
+          done
 
-    - name: Create hashcat-nightly.7z
-      run: 7z a -t7z -mx=9 hashcat-nightly.7z ./*
+      - name: Create hashcat-nightly.7z
+        run: 7z a -t7z -mx=9 hashcat-nightly.7z ./*
 
-    - uses: ncipollo/release-action@v1
-      with:
-        tag: nightly-${{ github.sha }}
-        name: "Nightly build – ${{ github.sha }}"
-        artifacts: hashcat-nightly.7z
-        allowUpdates: true
-        generateReleaseNotes: true
+      - uses: ncipollo/release-action@v1
+        with:
+          tag: nightly-${{ github.sha }}
+          name: "Nightly build – ${{ github.sha }}"
+          artifacts: hashcat-nightly.7z
+          allowUpdates: true
+          generateReleaseNotes: true
