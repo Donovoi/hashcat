@@ -1,42 +1,45 @@
 name: Auto-Sync-Nightly
 
 on:
+  # every 30 minutes (UTC)
   schedule:
-    - cron: "*/30 * * * *"           # every 30 min (UTC)
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
-# Cancel older runs on the same ref so the newest build always wins
+# Newer run on same ref cancels the older one
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true           # GitHub-recommended pattern :contentReference[oaicite:7]{index=7}
+  cancel-in-progress: true
 
 permissions:
-  contents: read                     # least-privilege default
+  contents: read   # least-privilege default
 
 jobs:
-# ------------------------------------------------------------------
-# 1) SYNC – fast-forward master from hashcat/hashcat
-# ------------------------------------------------------------------
+#------------------------------------------------
+# 1) SYNC  – fast-forward master from upstream
+#------------------------------------------------
   sync:
     runs-on: ubuntu-22.04
-    permissions: { contents: write } # PAT push needs this
+    permissions:
+      contents: write
     outputs:
       changed: ${{ steps.sync.outputs.has_new_commits }}
     steps:
       - uses: actions/checkout@v4
-        with: { persist-credentials: false }
-      - name: Fast-forward from upstream
+        with:
+          persist-credentials: false
+      - name: Fast-forward from hashcat/hashcat
         id: sync
         uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
         with:
           upstream_sync_repo: hashcat/hashcat
           upstream_sync_branch: master
           target_sync_branch: master
-          target_repo_token: ${{ secrets.PAT_PUSH }}   # PAT keeps triggers working
+          target_repo_token: ${{ secrets.PAT_PUSH }}
 
-# ------------------------------------------------------------------
+#------------------------------------------------
 # 2) BUILD – only when new commits arrived
-# ------------------------------------------------------------------
+#------------------------------------------------
   build:
     needs: sync
     if: needs.sync.outputs.changed == 'true'
@@ -44,30 +47,44 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ------- Linux -------
-          - os: ubuntu-22.04   ; os_name: linux   ; shared: 0
-          - os: ubuntu-22.04   ; os_name: linux   ; shared: 1
-          # ------- macOS -------
-          - os: macos-14       ; os_name: macos   ; shared: 0
-          - os: macos-14       ; os_name: macos   ; shared: 1
-          # ------- Windows ----
-          - os: windows-2022   ; os_name: windows ; shared: 0
-          - os: windows-2022   ; os_name: windows ; shared: 1
+          # ---------- Linux ----------
+          - os: ubuntu-22.04
+            os_name: linux
+            shared: 0
+          - os: ubuntu-22.04
+            os_name: linux
+            shared: 1
+          # ---------- macOS ----------
+          - os: macos-14
+            os_name: macos
+            shared: 0
+          - os: macos-14
+            os_name: macos
+            shared: 1
+          # ---------- Windows ----------
+          - os: windows-2022
+            os_name: windows
+            shared: 0
+          - os: windows-2022
+            os_name: windows
+            shared: 1
+
     runs-on: ${{ matrix.os }}
-    permissions: { contents: read }
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
 
-      # Windows → install MSYS2 tool-chain
+      # Windows → MSYS2 tool-chain
       - uses: msys2/setup-msys2@v2
-        if: runner.os == 'Windows'                # allowed in `if:` :contentReference[oaicite:8]{index=8}
+        if: runner.os == 'Windows'
         with:
           update: true
-          install: >-
+          install: >
             gcc git make libiconv libiconv-devel
 
-      # POSIX build (bash shell) for Linux & macOS
+      # POSIX build for Linux & macOS
       - name: Build hashcat (bash)
         if: runner.os != 'Windows'
         shell: bash
@@ -75,7 +92,7 @@ jobs:
           SHARED: ${{ matrix.shared }}
         run: make -j"$(nproc)"
 
-      # Windows build (msys2 shell)
+      # Windows build
       - name: Build hashcat (msys2)
         if: runner.os == 'Windows'
         shell: msys2 {0}
@@ -98,15 +115,15 @@ jobs:
             rules/
             example*
 
-# ------------------------------------------------------------------
-# 3) RELEASE – attach artefacts to rolling nightly tag
-# ------------------------------------------------------------------
+#------------------------------------------------
+# 3) RELEASE – nightly tag with fresh binaries
+#------------------------------------------------
   release:
     needs: build
     if: needs.sync.outputs.changed == 'true'
     runs-on: ubuntu-22.04
-    permissions: { contents: write }
-
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
       - name: Publish nightly release
