@@ -1,9 +1,8 @@
 name: Auto-Sync-Nightly
 
 on:
-  # every 30 minutes (UTC)
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/30 * * * *"       # every 30 min UTC
   workflow_dispatch:
     inputs:
       force_build:
@@ -11,28 +10,27 @@ on:
         type: boolean
         default: false
 
-# least-privilege by default
 permissions:
-  contents: read
+  contents: read                 # least-privilege default
 
-# cancel older runs on the same ref
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-# ────────────────────────────────────────────────────────────────
-# 1) SYNC – fast-forward fork/master from upstream/master
-# ────────────────────────────────────────────────────────────────
+###############################################################################
+# 1) SYNC – fast-forward fork/master from upstream master
+###############################################################################
   sync:
     runs-on: ubuntu-22.04
-    permissions: { contents: write }          # PAT push needs this
+    permissions:
+      contents: write            # needed for PAT push
     outputs:
       changed: ${{ steps.sync.outputs.has_new_commits }}
     steps:
       - uses: actions/checkout@v4
-        with: { persist-credentials: false }
-
+        with:
+          persist-credentials: false
       - id: sync
         uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
         with:
@@ -41,9 +39,9 @@ jobs:
           target_sync_branch: master
           target_repo_token: ${{ secrets.PAT_PUSH }}
 
-# ────────────────────────────────────────────────────────────────
+###############################################################################
 # 2) BUILD – compile on six OS/variant combos, upload artefacts
-# ────────────────────────────────────────────────────────────────
+###############################################################################
   build:
     needs: sync
     if: needs.sync.outputs.changed == 'true' ||
@@ -53,23 +51,36 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux
-          - { os: ubuntu-22.04,  os_name: linux,   shared: 0 }
-          - { os: ubuntu-22.04,  os_name: linux,   shared: 1 }
-          # macOS
-          - { os: macos-14,      os_name: macos,   shared: 0 }
-          - { os: macos-14,      os_name: macos,   shared: 1 }
-          # Windows
-          - { os: windows-2022,  os_name: windows, shared: 0 }
-          - { os: windows-2022,  os_name: windows, shared: 1 }
+          # ---------- Linux ----------
+          - os: ubuntu-22.04
+            os_name: linux
+            shared: 0
+          - os: ubuntu-22.04
+            os_name: linux
+            shared: 1
+          # ---------- macOS ----------
+          - os: macos-14
+            os_name: macos
+            shared: 0
+          - os: macos-14
+            os_name: macos
+            shared: 1
+          # ---------- Windows ----------
+          - os: windows-2022
+            os_name: windows
+            shared: 0
+          - os: windows-2022
+            os_name: windows
+            shared: 1
 
     runs-on: ${{ matrix.os }}
-    permissions: { contents: read }
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
 
-      # --- Windows: set up POSIX tool-chain (unique cache key) ---
+      # Windows – MSYS2 tool-chain with unique cache key
       - uses: msys2/setup-msys2@v2
         if: runner.os == 'Windows'
         with:
@@ -78,21 +89,22 @@ jobs:
           install: >
             gcc git make libiconv libiconv-devel
 
-      # --- Build on POSIX hosts (Linux/macOS) ---
+      # Build on POSIX hosts
       - name: Build (bash)
         if: runner.os != 'Windows'
         shell: bash
-        env: { SHARED: ${{ matrix.shared }} }
+        env:
+          SHARED: ${{ matrix.shared }}
         run: make -j"$(nproc)"
 
-      # --- Build on Windows (MSYS2) ---
+      # Build on Windows
       - name: Build (msys2)
         if: runner.os == 'Windows'
         shell: msys2 {0}
-        env: { SHARED: ${{ matrix.shared }} }
+        env:
+          SHARED: ${{ matrix.shared }}
         run: make -j"$(nproc || 4)"
 
-      # --- Upload artefact ---
       - uses: actions/upload-artifact@v4
         with:
           name: parts-${{ matrix.os_name }}-${{ matrix.shared }}
@@ -108,25 +120,24 @@ jobs:
             rules/
             example*
 
-# ────────────────────────────────────────────────────────────────
-# 3) RELEASE – merge artefacts, create one 7-Zip, publish nightly
-# ────────────────────────────────────────────────────────────────
+###############################################################################
+# 3) RELEASE – merge artefacts, create single 7-Zip, publish nightly tag
+###############################################################################
   release:
     needs: build
     if: always() && needs.build.result == 'success'
     runs-on: ubuntu-22.04          # p7zip is pre-installed
-    permissions: { contents: write }
-
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
 
-      # merge into bundle/ – later artefacts overwrite earlier files
-      - name: Collect build outputs
+      - name: Merge artefacts (overwrite duplicates)
         run: |
           mkdir -p bundle
           shopt -s nullglob
           for d in parts-*; do
-            rsync -a "$d"/ bundle/     # overwrite duplicates
+            rsync -a "$d"/ bundle/      # later artefacts overwrite earlier ones
             rm -rf "$d"
           done
 
