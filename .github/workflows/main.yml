@@ -98,10 +98,9 @@ jobs:
         env:
           SHARED: ${{ matrix.shared }}
         run: |
-          make -j"$(nproc)"
-          # legacy binary names for older launchers
-          ln -sf hashcat hashcat.bin
-          ln -sf hashcat hashcat64.bin
+          chmod a+x hashcat                     # ensure exec bit
+          cp hashcat hashcat.bin                # real file
+          cp hashcat hashcat64.bin              # real file
 
       # ---- Build on Windows ----
       - name: Build (msys2)
