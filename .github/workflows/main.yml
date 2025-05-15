@@ -124,15 +124,13 @@ jobs:
     if: always() && needs.build.result == 'success'
     runs-on: ubuntu-22.04
     permissions:
-      contents: write
+      contents: write         # <- crucial
     steps:
       - uses: actions/download-artifact@v4
-      - name: Publish nightly release
-        uses: ncipollo/release-action@v1
+      - uses: ncipollo/release-action@v1
         with:
           tag: nightly-${{ github.sha }}
           name: "Nightly build – ${{ github.sha }}"
           artifacts: "**/hashcat-*"
           generateReleaseNotes: true
           allowUpdates: true
-          token: ${{ secrets.PAT_PUSH }}
