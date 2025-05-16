@@ -1,4 +1,4 @@
-name: Auto‑Sync‑Nightly
+name: Auto-Sync-Nightly
 
 on:
   schedule:
@@ -10,26 +10,26 @@ on:
         type: boolean
         default: false
 
-# baseline token is read‑only; jobs elevate when needed
 permissions: { contents: read }
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
   cancel-in-progress: true
 
-################################################################################
-# 1) SYNC – keep our fork up‑to‑date
-################################################################################
 jobs:
+################################################################################
+# 1) SYNC – keep our fork up-to-date
+################################################################################
   sync:
     runs-on: ubuntu-22.04
-    permissions: { contents: write }             # push back to the fork
+    permissions: { contents: write }
     outputs:
       changed: ${{ steps.sync.outputs.has_new_commits }}
 
     steps:
       - uses: actions/checkout@v4
-        with: { persist-credentials: false }     # don’t leak GITHUB_TOKEN
+        with:
+          persist-credentials: false      # don’t leak GITHUB_TOKEN :contentReference[oaicite:0]{index=0}
 
       - id: sync
         uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
@@ -63,7 +63,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Windows tool‑chain ----------------------------------------------------
+      # Windows tool-chain ----------------------------------------------------
       - name: Set up MSYS2
         if: matrix.os_name == 'windows'
         uses: msys2/setup-msys2@v2
@@ -77,18 +77,20 @@ jobs:
       # Compile (POSIX) -------------------------------------------------------
       - name: make (POSIX)
         if: matrix.os_name != 'windows'
-        env: { SHARED: ${{ matrix.shared }} }
+        env:
+          SHARED: ${{ matrix.shared }}
         run: make -j"$(nproc || sysctl -n hw.ncpu || 4)"
 
       # Compile (Windows + MSYS2) --------------------------------------------
       - name: make (Windows)
         if: matrix.os_name == 'windows'
         shell: msys2 {0}
-        env: { SHARED: ${{ matrix.shared }} }
+        env:
+          SHARED: ${{ matrix.shared }}
         run: make -j"${NUMBER_OF_PROCESSORS:-4}"
 
       # Arrange artefacts -----------------------------------------------------
-      - name: Legacy names / macOS sub‑dir
+      - name: Legacy names / macOS sub-dir
         if: matrix.os_name != 'windows'
         run: |
           set -e
@@ -110,11 +112,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob                # ignore empty globs  :contentReference[oaicite:1]{index=1}
+          shopt -s nullglob               # unmatched globs → zero args :contentReference[oaicite:1]{index=1}
           files=(hashcat* libhashcat*)
-          # conditionally append directories that actually exist
           for d in macos charsets docs extra layouts masks modules rules example*; do
-            [[ -e "$d" ]] && files+=("$d")
+            [[ -e "$d" ]] && files+=("$d") # only add dirs that exist
           done
           tar --owner=0 --group=0 -cf "parts-${{ matrix.os_name }}.tar" "${files[@]}"
       - uses: actions/upload-artifact@v4
@@ -123,7 +124,7 @@ jobs:
           path: parts-${{ matrix.os_name }}.tar
 
 ################################################################################
-# 3) RELEASE – merge tars ➜ tar ➜ 7‑Zip
+# 3) RELEASE – merge tars ➜ tar ➜ 7-Zip
 ################################################################################
   release:
     needs: build
@@ -147,7 +148,7 @@ jobs:
       - name: Create tarball
         run: tar --owner=0 --group=0 -cf hashcat.tar -C dist .
 
-      - name: Compress with 7‑Zip
+      - name: Compress with 7-Zip
         run: 7z a -mx=9 -mmt=on hashcat.7z hashcat.tar
 
       - name: Publish / update release
