@@ -38,7 +38,7 @@ jobs:
           target_repo_token: ${{ secrets.PAT_PUSH }}
 
   ################################################################################
-  # 2) BUILD – Linux | macOS | Windows
+  # 2) BUILD – Linux | Windows
   ################################################################################
   build:
     needs: sync
@@ -52,7 +52,6 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-22.04, os_name: linux, shared: 0 }
-          - { os: macos-14, os_name: macos, shared: 1 }
           - { os: windows-2022, os_name: windows, shared: 1 }
 
     runs-on: ${{ matrix.os }}
@@ -66,18 +65,18 @@ jobs:
         if: matrix.os_name == 'windows'
         uses: msys2/setup-msys2@v2
         with:
-          install: >
+          install: >-
             gcc git make libiconv libiconv-devel
           msystem: MINGW64
           update: true
           release: false
 
-      # Compile ---------------------------------------------------------------
-      - name: make (POSIX)
-        if: matrix.os_name != 'windows'
+      # Compile --------------------------------------------------------------
+      - name: make (Linux)
+        if: matrix.os_name == 'linux'
         env:
           SHARED: ${{ matrix.shared }}
-        run: make -j"$(nproc || sysctl -n hw.ncpu || 4)"
+        run: make -j"$(nproc)"
 
       - name: make (Windows)
         if: matrix.os_name == 'windows'
@@ -86,21 +85,20 @@ jobs:
           SHARED: ${{ matrix.shared }}
         run: make -j"${NUMBER_OF_PROCESSORS:-4}"
 
-      # Arrange executables ---------------------------------------------------
-      - name: Add legacy names (Linux/macOS)
-        if: matrix.os_name != 'windows'
+      # Arrange executables --------------------------------------------------
+      - name: Add legacy names (Linux)
+        if: matrix.os_name == 'linux'
         run: |
-          set -e
           chmod 0755 hashcat
           cp -p hashcat hashcat.bin
-          cp -p hashcat hashcat64.bin   # BSD cp supports –p, not --preserve
+          cp -p hashcat hashcat64.bin     # ELF names kept for parity
 
       - name: Add legacy names (Windows)
         if: matrix.os_name == 'windows'
         shell: msys2 {0}
         run: cp -p hashcat.exe hashcat64.exe
 
-      # Pack artefact ---------------------------------------------------------
+      # Pack artefact --------------------------------------------------------
       - name: Pack artefact
         shell: bash
         run: |
@@ -112,7 +110,7 @@ jobs:
           done
           cmd=(tar)
           if tar --version 2>/dev/null | grep -q 'GNU'; then
-            cmd+=(--owner=0 --group=0)
+            cmd+=(--owner=0 --group=0)    # BSD tar flags not needed (no macOS)
           fi
           cmd+=(-cf "parts-${{ matrix.os_name }}.tar" "${files[@]}")
           "${cmd[@]}"
@@ -146,18 +144,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob
           expected_dirs=(charsets docs extra layouts masks modules OpenCL rules tunings)
           expected_files=(hashcat.hcstat2)
           bin_count=$(ls dist/hashcat* 2>/dev/null | wc -l)
-          [[ $bin_count -ge 1 ]] || { echo "No hashcat binaries!" ; exit 1; }
+          [[ $bin_count -ge 1 ]] || { echo "No hashcat binaries!"; exit 1; }
           for d in "${expected_dirs[@]}"; do
             [[ -d "dist/$d" ]] || { echo "Missing dir $d"; exit 1; }
           done
           for f in "${expected_files[@]}"; do
             [[ -f "dist/$f" ]] || { echo "Missing file $f"; exit 1; }
           done
-          echo "Layout matches upstream."
+          echo "Layout matches upstream (Linux & Windows only)."
 
       - name: Create tarball
         run: tar --owner=0 --group=0 -cf hashcat.tar -C dist .
