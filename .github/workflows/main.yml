@@ -97,13 +97,13 @@ jobs:
         shell: msys2 {0}
         run: cp -p hashcat.exe hashcat64.exe
 
-      # Create .7z artefact directly ----------------------------------------
+    # ---- Create .7z artefact directly ------------------------------------
       - name: Pack artefact
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
-          files=(hashcat* libhashcat* hashcat.hcstat2)
+          files=(hashcat* libhashcat*)               # <— duplicate removed
           for d in OpenCL charsets docs extra layouts masks modules rules tunings example*; do
             [[ -e "$d" ]] && files+=("$d")
           done
