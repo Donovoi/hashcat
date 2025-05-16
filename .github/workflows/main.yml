@@ -16,9 +16,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ################################################################################
-  # 1) SYNC – keep fork up-to-date
-  ################################################################################
+################################################################################
+# 1) SYNC – keep fork up-to-date
+################################################################################
   sync:
     runs-on: ubuntu-22.04
     permissions: { contents: write }
@@ -37,9 +37,9 @@ jobs:
           target_sync_branch: master
           target_repo_token: ${{ secrets.PAT_PUSH }}
 
-  ################################################################################
-  # 2) BUILD – Linux | macOS | Windows
-  ################################################################################
+################################################################################
+# 2) BUILD – Linux | macOS | Windows
+################################################################################
   build:
     needs: sync
     if: >
@@ -51,9 +51,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-22.04, os_name: linux, shared: 0 }
-          - { os: macos-14, os_name: macos, shared: 1 }
-          - { os: windows-2022, os_name: windows, shared: 1 }
+          - { os: ubuntu-22.04 , os_name: linux  , shared: 0 }
+          - { os: macos-14     , os_name: macos  , shared: 1 }
+          - { os: windows-2022 , os_name: windows, shared: 1 }
 
     runs-on: ${{ matrix.os }}
     permissions: { contents: read }
@@ -61,7 +61,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ---------- Windows tool-chain ----------
+      # MSYS2 for Windows -----------------------------------------------------
       - name: Set up MSYS2
         if: matrix.os_name == 'windows'
         uses: msys2/setup-msys2@v2
@@ -72,14 +72,13 @@ jobs:
           update: true
           release: false
 
-      # ---------- Compile (POSIX) -------------
+      # Compile ---------------------------------------------------------------
       - name: make (POSIX)
         if: matrix.os_name != 'windows'
         env:
           SHARED: ${{ matrix.shared }}
         run: make -j"$(nproc || sysctl -n hw.ncpu || 4)"
 
-      # ---------- Compile (Windows) -----------
       - name: make (Windows)
         if: matrix.os_name == 'windows'
         shell: msys2 {0}
@@ -87,7 +86,7 @@ jobs:
           SHARED: ${{ matrix.shared }}
         run: make -j"${NUMBER_OF_PROCESSORS:-4}"
 
-      # ---------- Arrange artefacts -----------
+      # Arrange artefacts -----------------------------------------------------
       - name: Legacy names / macOS sub-dir
         if: matrix.os_name != 'windows'
         run: |
@@ -106,14 +105,14 @@ jobs:
         shell: msys2 {0}
         run: cp hashcat.exe hashcat64.exe
 
-      # ---------- Pack artefact (portable tar) ----------
+      # Pack artefact ---------------------------------------------------------
       - name: Pack artefact
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
-          files=(hashcat* libhashcat*)
-          for d in macos charsets docs extra layouts masks modules rules example*; do
+          files=(hashcat* libhashcat* hashcat.hcstat2 hashcat.hctune)
+          for d in macos OpenCL charsets docs extra layouts masks modules rules example*; do
             [[ -e "$d" ]] && files+=("$d")
           done
 
@@ -129,9 +128,9 @@ jobs:
           name: parts-${{ matrix.os_name }}
           path: parts-${{ matrix.os_name }}.tar
 
-  ################################################################################
-  # 3) RELEASE – merge tars ▸ tar ▸ 7-Zip
-  ################################################################################
+################################################################################
+# 3) RELEASE – merge tars ▸ validate ▸ tar ▸ 7-Zip
+################################################################################
   release:
     needs: build
     if: always() && needs.build.result == 'success'
@@ -149,8 +148,23 @@ jobs:
           find parts-* -name '*.tar' -type f -print0 | \
             xargs -0 -I{} tar -xf {} -C dist
 
-      - name: Ensure execute bits
-        run: chmod +x dist/hashcat{,64}.bin dist/hashcat || true
+      - name: Validate archive layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          expected_dirs=(charsets docs extra layouts masks modules OpenCL rules)
+          expected_files=(hashcat.hcstat2 hashcat.hctune)
+          # binaries differ per OS, just check one exists
+          bin_count=$(ls dist/hashcat* 2>/dev/null | wc -l)
+          [[ $bin_count -ge 1 ]] || { echo "No hashcat binaries!"; exit 1; }
+          for d in "${expected_dirs[@]}"; do
+            [[ -d "dist/$d" ]] || { echo "Missing dir $d"; exit 1; }
+          done
+          for f in "${expected_files[@]}"; do
+            [[ -f "dist/$f" ]] || { echo "Missing file $f"; exit 1; }
+          done
+          echo "Layout matches upstream."
 
       - name: Create tarball
         run: tar --owner=0 --group=0 -cf hashcat.tar -C dist .
