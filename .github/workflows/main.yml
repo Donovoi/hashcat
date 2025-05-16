@@ -17,9 +17,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-################################################################################
-# 1) SYNC – keep our fork up-to-date
-################################################################################
+  ################################################################################
+  # 1) SYNC – keep our fork up-to-date
+  ################################################################################
   sync:
     runs-on: ubuntu-22.04
     permissions: { contents: write }
@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: false      # don’t leak GITHUB_TOKEN :contentReference[oaicite:0]{index=0}
+          persist-credentials: false # don’t leak GITHUB_TOKEN :contentReference[oaicite:0]{index=0}
 
       - id: sync
         uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
@@ -39,9 +39,9 @@ jobs:
           target_sync_branch: master
           target_repo_token: ${{ secrets.PAT_PUSH }}
 
-################################################################################
-# 2) BUILD – Linux | macOS | Windows
-################################################################################
+  ################################################################################
+  # 2) BUILD – Linux | macOS | Windows
+  ################################################################################
   build:
     needs: sync
     if: >-
@@ -53,9 +53,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-22.04 , os_name: linux  , shared: 0 }
-          - { os: macos-14     , os_name: macos  , shared: 1 }
-          - { os: windows-2022 , os_name: windows, shared: 1 }
+          - { os: ubuntu-22.04, os_name: linux, shared: 0 }
+          - { os: macos-14, os_name: macos, shared: 1 }
+          - { os: windows-2022, os_name: windows, shared: 1 }
 
     runs-on: ${{ matrix.os }}
     permissions: { contents: read }
@@ -114,20 +114,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob               # unmatched globs → zero args :contentReference[oaicite:1]{index=1}
+          shopt -s nullglob
           files=(hashcat* libhashcat*)
           for d in macos charsets docs extra layouts masks modules rules example*; do
-            [[ -e "$d" ]] && files+=("$d") # only add dirs that exist
+            [[ -e "$d" ]] && files+=("$d")
           done
-          tar --owner=0 --group=0 -cf "parts-${{ matrix.os_name }}.tar" "${files[@]}"
+
+          # portable tar flags ---------------------------------------------------------
+          if tar --version 2>/dev/null | grep -q 'GNU'; then
+            TARFLAGS=(--owner=0 --group=0)
+          else
+            TARFLAGS=()
+          fi
+
+          tar "${TARFLAGS[@]}" -cf "parts-${{ matrix.os_name }}.tar" "${files[@]}"
       - uses: actions/upload-artifact@v4
         with:
           name: parts-${{ matrix.os_name }}
           path: parts-${{ matrix.os_name }}.tar
 
-################################################################################
-# 3) RELEASE – merge tars ➜ tar ➜ 7-Zip
-################################################################################
+  ################################################################################
+  # 3) RELEASE – merge tars ➜ tar ➜ 7-Zip
+  ################################################################################
   release:
     needs: build
     if: always() && needs.build.result == 'success'
