@@ -1,7 +1,8 @@
 name: Auto-Sync-Nightly
 
 on:
-  schedule: [ { cron: "*/30 * * * *" } ]   # every 30 min
+  schedule:
+    - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
       force_build:
@@ -65,22 +66,24 @@ jobs:
         uses: msys2/setup-msys2@v2
         with:
           install: >
-            gcc git make libiconv libiconv-devel        # needed for Hashcat
+            gcc git make libiconv libiconv-devel
           update: true
-          release: false                                # faster cache
+          release: false
           msystem: MINGW64
 
       # Compile (POSIX) -------------------------------------------------------
       - name: make (POSIX)
         if: matrix.os_name != 'windows'
-        env: { SHARED: ${{ matrix.shared }} }
+        env:                       ⬅️
+          SHARED: ${{ matrix.shared }}   ⬅️
         run: make -j"$(nproc || sysctl -n hw.ncpu || 4)"
 
       # Compile (Windows + MSYS2) --------------------------------------------
       - name: make (Windows)
         if: matrix.os_name == 'windows'
         shell: msys2 {0}
-        env: { SHARED: ${{ matrix.shared }} }
+        env:                       ⬅️
+          SHARED: ${{ matrix.shared }}   ⬅️
         run: make -j"${NUMBER_OF_PROCESSORS:-4}"
 
       # Arrange artefacts -----------------------------------------------------
@@ -91,10 +94,11 @@ jobs:
           if [[ "${{ matrix.os_name }}" == linux ]]; then
             chmod 0755 hashcat
             cp --preserve=mode hashcat hashcat.bin hashcat64.bin
-          else                                 # macOS
+          else
             mkdir -p macos
             mv hashcat* libhashcat*.dylib macos/
           fi
+
       - name: Legacy names (Windows)
         if: matrix.os_name == 'windows'
         shell: msys2 {0}
@@ -102,7 +106,7 @@ jobs:
 
       # Pack into .tar to keep mode bits --------------------------------------
       - name: Pack artefact
-        shell: bash                        # safe everywhere
+        shell: bash
         run: |
           tar --owner=0 --group=0 -cf parts-${{ matrix.os_name }}.tar \
               hashcat* libhashcat* macos/ \
@@ -131,7 +135,7 @@ jobs:
             tar -xf "$t" -C dist
           done
 
-      - name: Ensure execute bits (belt & braces)
+      - name: Ensure execute bits
         run: chmod +x dist/hashcat{,64}.bin dist/hashcat || true
 
       - name: Create tarball
