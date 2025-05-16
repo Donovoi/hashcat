@@ -16,14 +16,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ################################################################################
-  # 1) SYNC – keep our fork up to date
-  ################################################################################
+################################################################################
+# 1) SYNC – keep fork up-to-date
+################################################################################
   sync:
     runs-on: ubuntu-22.04
     permissions: { contents: write }
     outputs:
       changed: ${{ steps.sync.outputs.has_new_commits }}
+
     steps:
       - uses: actions/checkout@v4
         with: { persist-credentials: false }
@@ -36,9 +37,9 @@ jobs:
           target_sync_branch: master
           target_repo_token: ${{ secrets.PAT_PUSH }}
 
-  ################################################################################
-  # 2) BUILD – Linux | macOS | Windows
-  ################################################################################
+################################################################################
+# 2) BUILD – Linux | macOS | Windows
+################################################################################
   build:
     needs: sync
     if: >
@@ -50,9 +51,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-22.04, os_name: linux, shared: 0 }
-          - { os: macos-14, os_name: macos, shared: 1 }
-          - { os: windows-2022, os_name: windows, shared: 1 }
+          - { os: ubuntu-22.04 , os_name: linux  , shared: 0 }
+          - { os: macos-14     , os_name: macos  , shared: 1 }
+          - { os: windows-2022 , os_name: windows, shared: 1 }
 
     runs-on: ${{ matrix.os }}
     permissions: { contents: read }
@@ -60,30 +61,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Windows tool-chain ----------------------------------------------------
+      # ---------- Windows tool-chain ----------
       - name: Set up MSYS2
         if: matrix.os_name == 'windows'
         uses: msys2/setup-msys2@v2
         with:
-          install: >
+          install: >-
             gcc git make libiconv libiconv-devel
           msystem: MINGW64
           update: true
           release: false
 
-      # Compile --------------------------------------------------------------
-      - name: make
+      # ---------- Compile (POSIX) -------------
+      - name: make (POSIX)
+        if: matrix.os_name != 'windows'
         env:
           SHARED: ${{ matrix.shared }}
-        run: |
-          if [[ "${{ matrix.os_name }}" == windows ]]; then
-            make -j"${NUMBER_OF_PROCESSORS:-4}"
-          else
-            make -j"$(nproc || sysctl -n hw.ncpu || 4)"
-          fi
-        shell: ${{ matrix.os_name == 'windows' && 'msys2 {0}' || 'bash' }}
+        run: make -j"$(nproc || sysctl -n hw.ncpu || 4)"
 
-      # Arrange artefacts -----------------------------------------------------
+      # ---------- Compile (Windows) -----------
+      - name: make (Windows)
+        if: matrix.os_name == 'windows'
+        shell: msys2 {0}
+        env:
+          SHARED: ${{ matrix.shared }}
+        run: make -j"${NUMBER_OF_PROCESSORS:-4}"
+
+      # ---------- Arrange artefacts -----------
       - name: Legacy names / macOS sub-dir
         if: matrix.os_name != 'windows'
         run: |
@@ -102,7 +106,7 @@ jobs:
         shell: msys2 {0}
         run: cp hashcat.exe hashcat64.exe
 
-      # Pack artefact ---------------------------------------------------------
+      # ---------- Pack artefact (portable tar) ----------
       - name: Pack artefact
         shell: bash
         run: |
@@ -125,9 +129,9 @@ jobs:
           name: parts-${{ matrix.os_name }}
           path: parts-${{ matrix.os_name }}.tar
 
-  ################################################################################
-  # 3) RELEASE – merge tars ▸ tar ▸ 7-Zip
-  ################################################################################
+################################################################################
+# 3) RELEASE – merge tars ▸ tar ▸ 7-Zip
+################################################################################
   release:
     needs: build
     if: always() && needs.build.result == 'success'
