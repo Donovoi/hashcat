@@ -1,9 +1,7 @@
-# .github/workflows/main.yml
 name: Auto-Sync-Nightly
 
 on:
-  schedule:
-    - cron: "*/30 * * * *"          # every 30 min
+  schedule: [ { cron: "*/30 * * * *" } ]   # every 30 min
   workflow_dispatch:
     inputs:
       force_build:
@@ -11,17 +9,15 @@ on:
         type: boolean
         default: false
 
-permissions:
-  contents: read
-
+permissions: { contents: read }
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
   cancel-in-progress: true
 
+jobs:
 ###############################################################################
 # 1) SYNC – keep our fork up-to-date
 ###############################################################################
-jobs:
   sync:
     runs-on: ubuntu-22.04
     permissions: { contents: write }
@@ -40,7 +36,7 @@ jobs:
           target_repo_token: ${{ secrets.PAT_PUSH }}
 
 ###############################################################################
-# 2) BUILD – Linux | macOS | Windows  ×  static | shared
+# 2) BUILD – Linux | macOS | Windows
 ###############################################################################
   build:
     needs: sync
@@ -53,52 +49,60 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ---------- Linux (static only – becomes .bin) ---------------------
-          - { os: ubuntu-22.04 , os_name: linux  , shared: 0 , shell: bash }
-          # ---------- macOS (shared build lives under macos/ ) --------------
-          - { os: macos-14     , os_name: macos  , shared: 1 , shell: bash }
-          # ---------- Windows (shared; .exe is always self-contained) --------
-          - { os: windows-2022 , os_name: windows, shared: 1 , shell: "msys2 {0}" }
+          - { os: ubuntu-22.04 , os_name: linux  , shared: 0 }
+          - { os: macos-14     , os_name: macos  , shared: 1 }
+          - { os: windows-2022 , os_name: windows, shared: 1 }
 
     runs-on: ${{ matrix.os }}
     permissions: { contents: read }
+
     steps:
       - uses: actions/checkout@v4
 
-      # ---- Windows tool-chain ---------------------------------------------
-      - name: Set up MSYS2 (Windows only)
+      # Windows tool-chain ----------------------------------------------------
+      - name: Set up MSYS2
         if: matrix.os_name == 'windows'
         uses: msys2/setup-msys2@v2
         with:
-          release: false
+          install: >
+            gcc git make libiconv libiconv-devel        # needed for Hashcat
           update: true
-          install: >-
-            gcc git make libiconv libiconv-devel
+          release: false                                # faster cache
+          msystem: MINGW64
 
-      # ---- Compile ---------------------------------------------------------
-      - name: make
-        shell: ${{ matrix.shell }}
-        env:
-          SHARED: ${{ matrix.shared }}
+      # Compile (POSIX) -------------------------------------------------------
+      - name: make (POSIX)
+        if: matrix.os_name != 'windows'
+        env: { SHARED: ${{ matrix.shared }} }
         run: make -j"$(nproc || sysctl -n hw.ncpu || 4)"
 
-      # ---- Arrange artefacts ----------------------------------------------
+      # Compile (Windows + MSYS2) --------------------------------------------
+      - name: make (Windows)
+        if: matrix.os_name == 'windows'
+        shell: msys2 {0}
+        env: { SHARED: ${{ matrix.shared }} }
+        run: make -j"${NUMBER_OF_PROCESSORS:-4}"
+
+      # Arrange artefacts -----------------------------------------------------
       - name: Legacy names / macOS sub-dir
-        shell: bash
+        if: matrix.os_name != 'windows'
         run: |
           set -e
           if [[ "${{ matrix.os_name }}" == linux ]]; then
             chmod 0755 hashcat
-            for n in hashcat.bin hashcat64.bin; do cp --preserve=mode hashcat "$n"; done
-          elif [[ "${{ matrix.os_name }}" == macos ]]; then
-            mkdir -p macos && mv hashcat* libhashcat*.dylib macos/
-          else # windows
-            cp hashcat.exe hashcat64.exe
+            cp --preserve=mode hashcat hashcat.bin hashcat64.bin
+          else                                 # macOS
+            mkdir -p macos
+            mv hashcat* libhashcat*.dylib macos/
           fi
+      - name: Legacy names (Windows)
+        if: matrix.os_name == 'windows'
+        shell: msys2 {0}
+        run: cp hashcat.exe hashcat64.exe
 
-      # ---- Pack into a tarball to keep mode bits ---------------------------
+      # Pack into .tar to keep mode bits --------------------------------------
       - name: Pack artefact
-        shell: bash
+        shell: bash                        # safe everywhere
         run: |
           tar --owner=0 --group=0 -cf parts-${{ matrix.os_name }}.tar \
               hashcat* libhashcat* macos/ \
@@ -109,40 +113,34 @@ jobs:
           path: parts-${{ matrix.os_name }}.tar
 
 ###############################################################################
-# 3) RELEASE – merge tars ➜ final tar ➜ 7-Zip
+# 3) RELEASE – merge tars ➜ tar ➜ 7-Zip
 ###############################################################################
   release:
     needs: build
     if: always() && needs.build.result == 'success'
     runs-on: ubuntu-22.04
     permissions: { contents: write }
+
     steps:
       - uses: actions/download-artifact@v4
 
-      # ---- Merge build outputs --------------------------------------------
       - name: Merge build outputs
         run: |
           mkdir dist
-          shopt -s nullglob
-          for t in parts-*/**/*.tar parts-*.tar; do
-            echo "Extracting $t"
+          for t in parts-*/*.tar parts-*.tar; do
             tar -xf "$t" -C dist
           done
 
-      # ---- Safety net: make sure hashcat is executable --------------------
-      - name: Restore execute bits
-        run: chmod +x dist/hashcat dist/hashcat.bin dist/hashcat64.bin || true
+      - name: Ensure execute bits (belt & braces)
+        run: chmod +x dist/hashcat{,64}.bin dist/hashcat || true
 
-      # 🟢 1. pack everything into a tarball (preserves modes)
       - name: Create tarball
         run: tar --owner=0 --group=0 -cf hashcat.tar -C dist .
 
-      # 🟢 2. compress with 7-Zip (safe for old p7zip 9.20)
-      - name: Create hashcat.7z
+      - name: Compress with 7-Zip
         run: 7z a -mx=9 -mmt=on hashcat.7z hashcat.tar
 
-      # ---- Publish / update release ---------------------------------------
-      - name: Publish Hashcat-Latest release
+      - name: Publish / update release
         uses: ncipollo/release-action@v1
         with:
           tag: Hashcat-Latest
