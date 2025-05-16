@@ -16,19 +16,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ################################################################################
-  # 1) SYNC – keep fork up-to-date
-  ################################################################################
+################################################################################
+# 1) SYNC – keep fork up-to-date
+################################################################################
   sync:
     runs-on: ubuntu-22.04
     permissions: { contents: write }
     outputs:
       changed: ${{ steps.sync.outputs.has_new_commits }}
-
     steps:
       - uses: actions/checkout@v4
-        with: { persist-credentials: false }
-
+        with:
+          persist-credentials: false
       - id: sync
         uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
         with:
@@ -37,9 +36,9 @@ jobs:
           target_sync_branch: master
           target_repo_token: ${{ secrets.PAT_PUSH }}
 
-  ################################################################################
-  # 2) BUILD – Linux | Windows
-  ################################################################################
+################################################################################
+# 2) BUILD – Linux | Windows → parts-<os>.7z
+################################################################################
   build:
     needs: sync
     if: >
@@ -51,8 +50,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-22.04, os_name: linux, shared: 0 }
-          - { os: windows-2022, os_name: windows, shared: 1 }
+          - { os: ubuntu-22.04 , os_name: linux  , shared: 0 }
+          - { os: windows-2022 , os_name: windows, shared: 1 }
 
     runs-on: ${{ matrix.os }}
     permissions: { contents: read }
@@ -65,7 +64,7 @@ jobs:
         if: matrix.os_name == 'windows'
         uses: msys2/setup-msys2@v2
         with:
-          install: >-
+          install: >
             gcc git make libiconv libiconv-devel
           msystem: MINGW64
           update: true
@@ -85,20 +84,20 @@ jobs:
           SHARED: ${{ matrix.shared }}
         run: make -j"${NUMBER_OF_PROCESSORS:-4}"
 
-      # Arrange executables --------------------------------------------------
-      - name: Add legacy names (Linux)
+      # Legacy executable aliases -------------------------------------------
+      - name: Add aliases (Linux)
         if: matrix.os_name == 'linux'
         run: |
           chmod 0755 hashcat
           cp -p hashcat hashcat.bin
-          cp -p hashcat hashcat64.bin     # ELF names kept for parity
+          cp -p hashcat hashcat64.bin
 
-      - name: Add legacy names (Windows)
+      - name: Add aliases (Windows)
         if: matrix.os_name == 'windows'
         shell: msys2 {0}
         run: cp -p hashcat.exe hashcat64.exe
 
-      # Pack artefact --------------------------------------------------------
+      # Create .7z artefact directly ----------------------------------------
       - name: Pack artefact
         shell: bash
         run: |
@@ -108,21 +107,15 @@ jobs:
           for d in OpenCL charsets docs extra layouts masks modules rules tunings example*; do
             [[ -e "$d" ]] && files+=("$d")
           done
-          cmd=(tar)
-          if tar --version 2>/dev/null | grep -q 'GNU'; then
-            cmd+=(--owner=0 --group=0)    # BSD tar flags not needed (no macOS)
-          fi
-          cmd+=(-cf "parts-${{ matrix.os_name }}.tar" "${files[@]}")
-          "${cmd[@]}"
-
+          7z a -mx=9 -mmt=on "parts-${{ matrix.os_name }}.7z" "${files[@]}"
       - uses: actions/upload-artifact@v4
         with:
           name: parts-${{ matrix.os_name }}
-          path: parts-${{ matrix.os_name }}.tar
+          path: parts-${{ matrix.os_name }}.7z
 
-  ################################################################################
-  # 3) RELEASE – merge tars ▸ validate ▸ tar ▸ 7-Zip
-  ################################################################################
+################################################################################
+# 3) RELEASE – publish the ready archives
+################################################################################
   release:
     needs: build
     if: always() && needs.build.result == 'success'
@@ -132,41 +125,11 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
 
-      - name: Merge build outputs
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir dist
-          find parts-* -name '*.tar' -type f -print0 | \
-            xargs -0 -I{} tar -xf {} -C dist
-
-      - name: Validate archive layout
-        shell: bash
-        run: |
-          set -euo pipefail
-          expected_dirs=(charsets docs extra layouts masks modules OpenCL rules tunings)
-          expected_files=(hashcat.hcstat2)
-          bin_count=$(ls dist/hashcat* 2>/dev/null | wc -l)
-          [[ $bin_count -ge 1 ]] || { echo "No hashcat binaries!"; exit 1; }
-          for d in "${expected_dirs[@]}"; do
-            [[ -d "dist/$d" ]] || { echo "Missing dir $d"; exit 1; }
-          done
-          for f in "${expected_files[@]}"; do
-            [[ -f "dist/$f" ]] || { echo "Missing file $f"; exit 1; }
-          done
-          echo "Layout matches upstream (Linux & Windows only)."
-
-      - name: Create tarball
-        run: tar --owner=0 --group=0 -cf hashcat.tar -C dist .
-
-      - name: Compress with 7-Zip
-        run: 7z a -mx=9 -mmt=on hashcat.7z hashcat.tar
-
       - name: Publish / update release
         uses: ncipollo/release-action@v1
         with:
           tag: Hashcat-Latest
           name: Hashcat-Latest
-          artifacts: hashcat.7z
+          artifacts: parts-*/*.7z
           allowUpdates: true
           generateReleaseNotes: true
