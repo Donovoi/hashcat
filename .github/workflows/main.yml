@@ -74,16 +74,16 @@ jobs:
       # Compile (POSIX) -------------------------------------------------------
       - name: make (POSIX)
         if: matrix.os_name != 'windows'
-        env:                       ⬅️
-          SHARED: ${{ matrix.shared }}   ⬅️
+        env:                       
+          SHARED: ${{ matrix.shared }}   
         run: make -j"$(nproc || sysctl -n hw.ncpu || 4)"
 
       # Compile (Windows + MSYS2) --------------------------------------------
       - name: make (Windows)
         if: matrix.os_name == 'windows'
         shell: msys2 {0}
-        env:                       ⬅️
-          SHARED: ${{ matrix.shared }}   ⬅️
+        env:                       
+          SHARED: ${{ matrix.shared }}   
         run: make -j"${NUMBER_OF_PROCESSORS:-4}"
 
       # Arrange artefacts -----------------------------------------------------
