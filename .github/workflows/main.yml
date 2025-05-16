@@ -19,19 +19,17 @@ concurrency:
   cancel-in-progress: true
 
 ###############################################################################
-# 1) SYNC  – keep our fork up-to-date
+# 1) SYNC – keep our fork up-to-date
 ###############################################################################
 jobs:
   sync:
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write
+    permissions: { contents: write }
     outputs:
       changed: ${{ steps.sync.outputs.has_new_commits }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
+        with: { persist-credentials: false }
 
       - id: sync
         uses: aormsby/Fork-Sync-With-Upstream-action@v3.4.1
@@ -42,7 +40,7 @@ jobs:
           target_repo_token: ${{ secrets.PAT_PUSH }}
 
 ###############################################################################
-# 2) BUILD  – Linux | macOS | Windows  ×  static | shared
+# 2) BUILD – Linux | macOS | Windows  ×  static | shared
 ###############################################################################
   build:
     needs: sync
@@ -55,27 +53,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ---------- Linux (static only – becomes .bin) ----------------------
-          - os: ubuntu-22.04
-            os_name: linux
-            shared: 0
-          # ---------- macOS (shared build lives under macos/ ) ---------------
-          - os: macos-14
-            os_name: macos
-            shared: 1
-          # ---------- Windows (shared; .exe is always self-contained) ---------
-          - os: windows-2022
-            os_name: windows
-            shared: 1
-            shell: "msys2 {0}"
+          # ---------- Linux (static only – becomes .bin) ---------------------
+          - { os: ubuntu-22.04 , os_name: linux  , shared: 0 , shell: bash }
+          # ---------- macOS (shared build lives under macos/ ) --------------
+          - { os: macos-14     , os_name: macos  , shared: 1 , shell: bash }
+          # ---------- Windows (shared; .exe is always self-contained) --------
+          - { os: windows-2022 , os_name: windows, shared: 1 , shell: "msys2 {0}" }
 
     runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
+    permissions: { contents: read }
     steps:
       - uses: actions/checkout@v4
 
-      # ---- Windows tool-chain ----------------------------------------------
+      # ---- Windows tool-chain ---------------------------------------------
       - name: Set up MSYS2 (Windows only)
         if: matrix.os_name == 'windows'
         uses: msys2/setup-msys2@v2
@@ -85,14 +75,14 @@ jobs:
           install: >-
             gcc git make libiconv libiconv-devel
 
-      # ---- Compile ----------------------------------------------------------
+      # ---- Compile ---------------------------------------------------------
       - name: make
-        shell: ${{ matrix.shell || 'bash' }}
+        shell: ${{ matrix.shell }}
         env:
           SHARED: ${{ matrix.shared }}
         run: make -j"$(nproc || sysctl -n hw.ncpu || 4)"
 
-      # ---- Arrange artefacts -------------------------------------------------
+      # ---- Arrange artefacts ----------------------------------------------
       - name: Legacy names / macOS sub-dir
         shell: bash
         run: |
@@ -102,11 +92,11 @@ jobs:
             for n in hashcat.bin hashcat64.bin; do cp --preserve=mode hashcat "$n"; done
           elif [[ "${{ matrix.os_name }}" == macos ]]; then
             mkdir -p macos && mv hashcat* libhashcat*.dylib macos/
-          else  # windows
+          else # windows
             cp hashcat.exe hashcat64.exe
           fi
 
-      # ---- Pack into a tarball to keep mode bits ----------------------------
+      # ---- Pack into a tarball to keep mode bits ---------------------------
       - name: Pack artefact
         shell: bash
         run: |
@@ -119,18 +109,17 @@ jobs:
           path: parts-${{ matrix.os_name }}.tar
 
 ###############################################################################
-# 3) RELEASE  – merge tars ➜ final tar ➜ 7-Zip
+# 3) RELEASE – merge tars ➜ final tar ➜ 7-Zip
 ###############################################################################
   release:
     needs: build
     if: always() && needs.build.result == 'success'
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write
+    permissions: { contents: write }
     steps:
       - uses: actions/download-artifact@v4
 
-      # ---- Merge build outputs ---------------------------------------------
+      # ---- Merge build outputs --------------------------------------------
       - name: Merge build outputs
         run: |
           mkdir dist
@@ -140,7 +129,7 @@ jobs:
             tar -xf "$t" -C dist
           done
 
-      # ---- Safety net: ensure hashcat.bin is executable ---------------------
+      # ---- Safety net: make sure hashcat is executable --------------------
       - name: Restore execute bits
         run: chmod +x dist/hashcat dist/hashcat.bin dist/hashcat64.bin || true
 
@@ -152,7 +141,7 @@ jobs:
       - name: Create hashcat.7z
         run: 7z a -mx=9 -mmt=on hashcat.7z hashcat.tar
 
-      # ---- Publish / update release ----------------------------------------
+      # ---- Publish / update release ---------------------------------------
       - name: Publish Hashcat-Latest release
         uses: ncipollo/release-action@v1
         with:
