@@ -61,7 +61,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Windows tool-chain ----------------------------------------------------
+      # ---------- Windows tool-chain ----------
       - name: Set up MSYS2
         if: matrix.os_name == 'windows'
         uses: msys2/setup-msys2@v2
@@ -72,7 +72,7 @@ jobs:
           update: true
           release: false
 
-      # Compile ---------------------------------------------------------------
+      # ---------- Compile ----------
       - name: make (POSIX)
         if: matrix.os_name != 'windows'
         env:
@@ -86,38 +86,33 @@ jobs:
           SHARED: ${{ matrix.shared }}
         run: make -j"${NUMBER_OF_PROCESSORS:-4}"
 
-      # Arrange artefacts -----------------------------------------------------
-      - name: Legacy names / macOS sub-dir
+      # ---------- Arrange artefacts ----------
+      - name: Add legacy executable names
         if: matrix.os_name != 'windows'
         run: |
           set -e
-          if [[ "${{ matrix.os_name }}" == linux ]]; then
-            chmod 0755 hashcat
-            cp --preserve=mode hashcat hashcat.bin
-            cp --preserve=mode hashcat hashcat64.bin
-          else
-            mkdir -p macos
-            mv hashcat* libhashcat*.dylib macos/
-          fi
+          chmod 0755 hashcat
+          cp --preserve=mode hashcat hashcat.bin
+          cp --preserve=mode hashcat hashcat64.bin
 
-      - name: Legacy names (Windows)
+      - name: Add legacy names (Windows)
         if: matrix.os_name == 'windows'
         shell: msys2 {0}
         run: cp hashcat.exe hashcat64.exe
 
-      # Pack artefact ---------------------------------------------------------
+      # ---------- Pack artefact ----------
       - name: Pack artefact
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
           files=(hashcat* libhashcat* hashcat.hcstat2)
-          for d in macos OpenCL charsets docs extra layouts masks modules rules tunings example*; do
+          for d in OpenCL charsets docs extra layouts masks modules rules tunings example*; do
             [[ -e "$d" ]] && files+=("$d")
           done
           cmd=(tar)
           if tar --version 2>/dev/null | grep -q 'GNU'; then
-            cmd+=(--owner=0 --group=0)
+            cmd+=(--owner=0 --group=0)    # BSD tar (macOS) rejects these flags
           fi
           cmd+=(-cf "parts-${{ matrix.os_name }}.tar" "${files[@]}")
           "${cmd[@]}"
@@ -165,8 +160,7 @@ jobs:
           echo "Layout matches upstream."
 
       - name: Create tarball
-        run: |
-          tar --owner=0 --group=0 -cf hashcat.tar -C dist .
+        run: tar --owner=0 --group=0 -cf hashcat.tar -C dist .
 
       - name: Compress with 7-Zip
         run: 7z a -mx=9 -mmt=on hashcat.7z hashcat.tar
