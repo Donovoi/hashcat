@@ -70,6 +70,15 @@ static bool is_same_device (const hc_device_param_t *src, const hc_device_param_
   // Metal can't have aliases
 
   if ((src->is_metal == true) && (dst->is_metal == true)) return false;
+
+  // But Metal and OpenCL can have aliases
+
+  if ((src->is_metal == true) && (dst->is_opencl == true))
+  {
+    // Prevents hashcat, when started with x86_64 emulation on Apple Silicon, from showing the Apple M1 OpenCL CPU as an alias for the Apple M1 Metal GPU
+
+    if (src->opencl_device_type != dst->opencl_device_type) return false;
+  }
   #endif
 
   // But OpenCL can have aliases
@@ -9668,7 +9677,7 @@ int backend_session_begin (hashcat_ctx_t *hashcat_ctx)
             continue;
           }
 
-          device_param->device_available_mem -= used_bytes;
+          device_param->device_available_mem = device_param->device_global_mem - used_bytes;
 
           break;
         }
@@ -9721,7 +9730,13 @@ int backend_session_begin (hashcat_ctx_t *hashcat_ctx)
 
         if (next[0] == '#') continue;
 
-        tuning_db_process_line (hashcat_ctx, next, line_num);
+        char *search_name = NULL;
+
+        hc_asprintf (&search_name, "MODULE_%02d_%s", device_param->device_id, next);
+
+        tuning_db_process_line (hashcat_ctx, search_name, line_num);
+
+        hcfree (search_name);
 
       } while ((next = strtok_r ((char *) NULL, "\n", &saveptr)) != NULL);
 
@@ -9882,13 +9897,31 @@ int backend_session_begin (hashcat_ctx_t *hashcat_ctx)
 
     tuning_db_entry_t *tuningdb_entry = NULL;
 
-    if (user_options->slow_candidates == true)
+    for (int i = 0; i < 2; i++)
     {
-      tuningdb_entry = tuning_db_search (hashcat_ctx, device_param->device_name, device_param->opencl_device_type, 0, hashconfig->hash_mode);
-    }
-    else
-    {
-      tuningdb_entry = tuning_db_search (hashcat_ctx, device_param->device_name, device_param->opencl_device_type, user_options->attack_mode, hashconfig->hash_mode);
+      char *search_name = NULL;
+
+      if (i == 0)
+      {
+        hc_asprintf (&search_name, "MODULE_%02d_%s", device_param->device_id, device_param->device_name);
+      }
+      else
+      {
+        search_name = device_param->device_name;
+      }
+
+      if (user_options->slow_candidates == true)
+      {
+        tuningdb_entry = tuning_db_search (hashcat_ctx, search_name, device_param->opencl_device_type, 0, hashconfig->hash_mode);
+      }
+      else
+      {
+        tuningdb_entry = tuning_db_search (hashcat_ctx, search_name, device_param->opencl_device_type, user_options->attack_mode, hashconfig->hash_mode);
+      }
+
+      if (i == 0) hcfree (search_name);
+
+      if (tuningdb_entry != NULL) break;
     }
 
     // user commandline option override tuning db
@@ -10528,7 +10561,7 @@ int backend_session_begin (hashcat_ctx_t *hashcat_ctx)
 
     char device_name_chksum_amp_mp[HCBUFSIZ_TINY] = { 0 };
 
-    const size_t dnclen_amp_mp = snprintf (device_name_chksum_amp_mp, HCBUFSIZ_TINY, "%d-%d-%d-%u-%d-%u-%s-%s-%s-%u",
+    const size_t dnclen_amp_mp = snprintf (device_name_chksum_amp_mp, HCBUFSIZ_TINY, "%d-%d-%d-%u-%d-%u-%s-%s-%s-%u-%u",
       backend_ctx->comptime,
       backend_ctx->cuda_driver_version,
       backend_ctx->hip_runtimeVersion,
@@ -10538,7 +10571,8 @@ int backend_session_begin (hashcat_ctx_t *hashcat_ctx)
       device_param->device_name,
       device_param->opencl_device_version,
       device_param->opencl_driver_version,
-      (user_options->kernel_threads_chgd == true) ? user_options->kernel_threads : device_param->kernel_threads_max);
+      (user_options->kernel_threads_chgd == true) ? user_options->kernel_threads : device_param->kernel_threads_max,
+      get_current_arch());
 
     md5_ctx_t md5_ctx;
 
@@ -11090,7 +11124,7 @@ int backend_session_begin (hashcat_ctx_t *hashcat_ctx)
 
       const u32 extra_value = (user_options->attack_mode == ATTACK_MODE_ASSOCIATION) ? ATTACK_MODE_ASSOCIATION : ATTACK_MODE_NONE;
 
-      const size_t dnclen = snprintf (device_name_chksum, HCBUFSIZ_TINY, "%d-%d-%d-%u-%d-%u-%s-%s-%s-%d-%u-%u-%u-%s",
+      const size_t dnclen = snprintf (device_name_chksum, HCBUFSIZ_TINY, "%d-%d-%d-%u-%d-%u-%s-%s-%s-%d-%u-%u-%u-%u-%s",
         backend_ctx->comptime,
         backend_ctx->cuda_driver_version,
         backend_ctx->hip_runtimeVersion,
@@ -11104,6 +11138,7 @@ int backend_session_begin (hashcat_ctx_t *hashcat_ctx)
         hashconfig->kern_type,
         extra_value,
         (user_options->kernel_threads_chgd == true) ? user_options->kernel_threads : device_param->kernel_threads_max,
+        get_current_arch(),
         build_options_module_buf);
 
       memset     (&md5_ctx, 0, sizeof (md5_ctx_t));
