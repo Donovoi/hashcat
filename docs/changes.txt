@@ -92,6 +92,7 @@
 - Fixed bug in grep out-of-memory workaround on Unit Test
 - Fixed bug in input_tokenizer when TOKEN_ATTR_FIXED_LENGTH is used and refactor modules
 - Fixed bug in --stdout that caused certain rules to malfunction
+- Fixed bug in Hardware Monitor: prevent disable if ADL fail
 - Fixed race condition in selftest_init on OpenCL with non-blocking write
 - Fixed build failed for 10700 optimized with Apple Metal
 - Fixed build failed for 13772 and 13773 with Apple Metal
@@ -128,6 +129,7 @@
 - Apple Driver: Automatically enable GPU support on Apple OpenCL instead of CPU support
 - Apple Driver: Updated requirements to use Apple OpenCL API to macOS 13.0 - use
 - Backend: Updated filename chksum format to prevent invalid cache on Apple Silicon when switching arch
+- Backend: Splitting backend_ctx_devices_init into smaller runtime-specific functions
 - Backend Checks: Describe workaround in error message when detecting more than 64 backend devices
 - Backend Info: Added --machine-readable format
 - Brain: Added sanity check and corresponding error message for invalid --brain-port values
@@ -156,6 +158,7 @@
 - Modules: Check UnpackSize to raise false positive with hc_decompress_rar
 - User Options: added --metal-compiler-runtime option
 - Hardware Monitor: avoid sprintf in src/ext_iokit.c
+- Hardware Monitor: Splitting hwmon_ctx_init function into smaller library-specific functions
 - Help: show supported hash-modes only with -hh
 - Makefile: prevent make failure with Apple Silicon in case of partial rebuild
 - Rules: Rename best64.rule to best66.rule and remove the unknown section from it
