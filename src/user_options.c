@@ -1103,11 +1103,25 @@ int user_options_sanity (hashcat_ctx_t *hashcat_ctx)
     }
   }
 
+  if (user_options->stdout_flag == true && user_options->slow_candidates == true)
+  {
+    event_log_error (hashcat_ctx, "Slow candidates (-S) is not allowed in stdout mode.");
+
+    return -1;
+  }
+
   if ((user_options->show == true) && ((user_options->username == true) || (user_options->dynamic_x == true)))
   {
     event_log_error (hashcat_ctx, "Mixing --show with --username or --dynamic-x can cause exponential delay in output.");
 
     return 0;
+  }
+
+  if (user_options->show == true && user_options->restore == true)
+  {
+    event_log_error (hashcat_ctx, "Mixing --show and --restore is not allowed.");
+
+    return -1;
   }
 
   if (user_options->show == true || user_options->left == true)
