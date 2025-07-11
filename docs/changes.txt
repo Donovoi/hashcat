@@ -58,6 +58,7 @@
 - Added hash-mode: md5(md5($salt).md5(md5($pass)))
 - Added hash-mode: Domain Cached Credentials 2 (DCC2), MS Cache 2, (NT)
 - Added hash-mode: Domain Cached Credentials (DCC), MS Cache (NT)
+- Added hash-mode: md5(md5(md5($pass.$salt1)).$salt2)
 - Added hash-mode: md5(md5(md5($pass).$salt1).$salt2)
 - Added hash-mode: md5(md5(md5($pass)).$salt)
 - Added hash-mode: md5(sha1($pass.$salt))
@@ -179,6 +180,7 @@
 - Makefile: prevent make failure with Apple Silicon in case of partial rebuild
 - Makefile: updated MACOSX_DEPLOYMENT_TARGET to 15.0
 - Rules: Rename best64.rule to best66.rule and remove the unknown section from it
+- Kernel: Renamed multiple defines in CAST cipher to fit expected naming convention of the C++ language standard
 
 * changes v6.2.5 -> v6.2.6
 
