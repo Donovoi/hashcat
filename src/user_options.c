@@ -44,6 +44,8 @@ static const struct option long_options[] =
   {"backend-ignore-opencl",     no_argument,       NULL, IDX_BACKEND_IGNORE_OPENCL},
   {"backend-info",              no_argument,       NULL, IDX_BACKEND_INFO},
   {"backend-vector-width",      required_argument, NULL, IDX_BACKEND_VECTOR_WIDTH},
+  {"bypass-delay",              required_argument, NULL, IDX_BYPASS_DELAY},
+  {"bypass-threshold",          required_argument, NULL, IDX_BYPASS_THRESHOLD},
   {"benchmark-all",             no_argument,       NULL, IDX_BENCHMARK_ALL},
   {"benchmark-max",             required_argument, NULL, IDX_BENCHMARK_MAX},
   {"benchmark-min",             required_argument, NULL, IDX_BENCHMARK_MIN},
@@ -379,6 +381,8 @@ int user_options_getopt (hashcat_ctx_t *hashcat_ctx, int argc, char **argv)
       case IDX_MARKOV_THRESHOLD:
       case IDX_OUTFILE_CHECK_TIMER:
       case IDX_BACKEND_VECTOR_WIDTH:
+      case IDX_BYPASS_DELAY:
+      case IDX_BYPASS_THRESHOLD:
       case IDX_WORKLOAD_PROFILE:
       case IDX_KERNEL_ACCEL:
       case IDX_KERNEL_LOOPS:
@@ -535,6 +539,10 @@ int user_options_getopt (hashcat_ctx_t *hashcat_ctx, int argc, char **argv)
       case IDX_BACKEND_DEVICES_KEEPFREE:  user_options->backend_devices_keepfree  = hc_strtoul (optarg, NULL, 10);   break;
       case IDX_BACKEND_VECTOR_WIDTH:      user_options->backend_vector_width      = hc_strtoul (optarg, NULL, 10);
                                           user_options->backend_vector_width_chgd = true;                            break;
+      case IDX_BYPASS_DELAY:              user_options->bypass_delay              = hc_strtoul (optarg, NULL, 10);
+                                          user_options->bypass_delay_chgd         = true;                            break;
+      case IDX_BYPASS_THRESHOLD:          user_options->bypass_threshold          = hc_strtoul (optarg, NULL, 10);
+                                          user_options->bypass_threshold_chgd     = true;                            break;
       case IDX_OPENCL_DEVICE_TYPES:       user_options->opencl_device_types       = optarg;                          break;
       case IDX_OPTIMIZED_KERNEL_ENABLE:   user_options->optimized_kernel          = true;                            break;
       case IDX_MULTIPLY_ACCEL_DISABLE:    user_options->multiply_accel            = false;                           break;
@@ -994,7 +1002,7 @@ int user_options_sanity (hashcat_ctx_t *hashcat_ctx)
   {
     event_log_error (hashcat_ctx, "Invalid -i/--increment value.");
 
-    return -1;    
+    return -1;
   }
 
   if ((user_options->rp_files_cnt > 0) && (user_options->rp_gen > 0))
@@ -1207,6 +1215,23 @@ int user_options_sanity (hashcat_ctx_t *hashcat_ctx)
     }
   }
 
+  if (user_options->total_candidates == true)
+  {
+    if (user_options->show == true)
+    {
+      event_log_error (hashcat_ctx, "Combining --show with --total-candidates is not allowed.");
+
+      return -1;
+    }
+
+   if (user_options->left == true)
+    {
+      event_log_error (hashcat_ctx, "Combining --left with --total-candidates is not allowed.");
+
+      return -1;
+    }
+  }
+
   if (user_options->machine_readable == true)
   {
     if (user_options->status_json == true)
@@ -1409,6 +1434,13 @@ int user_options_sanity (hashcat_ctx_t *hashcat_ctx)
     if (user_options->progress_only == true)
     {
       event_log_error (hashcat_ctx, "Can't change --progress-only in benchmark mode.");
+
+      return -1;
+    }
+
+    if (user_options->slow_candidates == true)
+    {
+      event_log_error (hashcat_ctx, "Use of --slow-candidates (-S) is not allowed in benchmark mode.");
 
       return -1;
     }
@@ -1675,7 +1707,7 @@ int user_options_sanity (hashcat_ctx_t *hashcat_ctx)
 
     bool mask_is_missing = true;
 
-    if (user_options->keyspace == true) // special case if --keyspace was used: we need the mask but no hash file
+    if (user_options->keyspace == true || user_options->total_candidates == true) // special case if --keyspace was used: we need the mask but no hash file
     {
       if (user_options->hc_argc > 0) mask_is_missing = false;
     }
@@ -1694,6 +1726,13 @@ int user_options_sanity (hashcat_ctx_t *hashcat_ctx)
 
       return -1;
     }
+  }
+
+  if ((user_options->bypass_delay_chgd && !user_options->bypass_threshold_chgd) || (!user_options->bypass_delay_chgd && user_options->bypass_threshold_chgd))
+  {
+    event_log_error (hashcat_ctx, "You must specify --bypass-delay and --bypass-threshold together.");
+
+    return -1;
   }
 
   // argc / argv checks
@@ -1742,7 +1781,7 @@ int user_options_sanity (hashcat_ctx_t *hashcat_ctx)
       show_error = false;
     }
   }
-  else if (user_options->keyspace == true)
+  else if (user_options->keyspace == true || user_options->total_candidates == true)
   {
     if (user_options->attack_mode == ATTACK_MODE_STRAIGHT)
     {
@@ -2438,7 +2477,7 @@ void user_options_info (hashcat_ctx_t *hashcat_ctx)
     {
       event_log_info (hashcat_ctx, "# option: --kernel-threads=%u", user_options->kernel_threads);
     }
-    
+
     if (user_options->workload_profile_chgd == true)
     {
       event_log_info (hashcat_ctx, "# option: --workload-profile=%u", user_options->workload_profile);
@@ -3316,6 +3355,70 @@ int user_options_check_files (hashcat_ctx_t *hashcat_ctx)
 
       return -1;
     }
+  }
+
+  if (user_options->veracrypt_keyfiles != NULL)
+  {
+    char *keyfiles = hcstrdup (user_options->veracrypt_keyfiles);
+
+    char *saveptr = NULL;
+
+    char *keyfile = strtok_r (keyfiles, ",", &saveptr);
+
+    while (keyfile)
+    {
+      if (hc_path_exist (keyfile) == true)
+      {
+        if (hc_path_read (keyfile) == false)
+        {
+          event_log_error (hashcat_ctx, "%s: %s", keyfile, strerror (errno));
+
+          return -1;
+        }
+      }
+      else
+      {
+        event_log_error (hashcat_ctx, "%s: %s", keyfile, strerror (errno));
+
+        return -1;
+      }
+
+      keyfile = strtok_r ((char *) NULL, ",", &saveptr);
+    }
+
+    hcfree (keyfiles);
+  }
+
+  if (user_options->truecrypt_keyfiles != NULL)
+  {
+    char *keyfiles = hcstrdup (user_options->truecrypt_keyfiles);
+
+    char *saveptr = NULL;
+
+    char *keyfile = strtok_r (keyfiles, ",", &saveptr);
+
+    while (keyfile)
+    {
+      if (hc_path_exist (keyfile) == true)
+      {
+        if (hc_path_read (keyfile) == false)
+        {
+          event_log_error (hashcat_ctx, "%s: %s", keyfile, strerror (errno));
+
+          return -1;
+        }
+      }
+      else
+      {
+        event_log_error (hashcat_ctx, "%s: %s", keyfile, strerror (errno));
+
+        return -1;
+      }
+
+      keyfile = strtok_r ((char *) NULL, ",", &saveptr);
+    }
+
+    hcfree (keyfiles);
   }
 
   /**
