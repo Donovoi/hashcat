@@ -27,7 +27,8 @@ function usage()
   echo ""
   echo "-t / --target-type <arg>            : set Target Type (default: all. supported: single, multi)"
   echo ""
-  echo "-V / --vector-width <arg>           : set Vector Width (default: all. supported: 1, 2, 4, 8, 16)"
+  echo "-V / --vector-width <arg>           : set Vector Width or a list of comma-separated Vector Widths"
+  echo "                                      (default: all. supported: 1, 2, 4, 8, 16)"
   echo "     --vector-width-min <arg>       : set min vector-width (default: 1)"
   echo "     --vector-width-max <arg>       : set max vector-width (default: 16)"
   echo ""
@@ -44,6 +45,8 @@ function usage()
   echo "     --backend-devices-keepfree     : Keep specified percentage of device memory free (default: disabled. supported: from 1 to 100)"
   echo ""
   echo "     --allow-all-attacks            : Do not skip attack types other than Straight with hash types with attack exec outside kernel"
+  echo ""
+  echo "     --allow-self-tests             : Do not skip self tests"
   echo ""
   echo "-f / --force                        : run hashcat using --force"
   echo ""
@@ -93,8 +96,9 @@ METAL_BACKEND=0
 METAL_COMPILER_RUNTIME=120
 BACKEND_DEVICES_KEEPFREE=0
 ALL_ATTACKS=0
+SELF_TEST_DISABLE=1
 
-OPTS="--quiet --potfile-disable --hwmon-disable --self-test-disable --machine-readable --logfile-disable"
+OPTS="--quiet --potfile-disable --hwmon-disable --machine-readable --logfile-disable"
 
 SKIP_HASH_TYPES="" #2000 2500 2501 16800 16801 99999 32000"
 SKIP_HASH_TYPES_METAL="21800"
@@ -106,7 +110,7 @@ SKIP_SAME_SALT_HASH_TYPES="6600 7100 7200 8200 13200 13400 15300 15310 15900 159
 #SKIP_SAME_SALT_HASH_TYPES="400 3200 5800 6400 6500 6600 6700 7100 7200 7401 7900 8200 9100 9200 9400 10500 10901 12001 12200 12300 12400 12500 12700 12800 12900 13000 13200 13400 13600 14700 14800 15100 15200 15300 15310 15400 15600 15900 15910 16200 16300 16700 16900 18300 18400 18800 18900 19000 19100 19600 19700 19800 19900 20011 20012 20013 20200 20300 20400 21501 22100 22400 22600 23100 23300 23500 23600 23700 23900 24100 24200 24410 24420 24500 25300 25400 25500 25600 25800 26100 26500 26600 27000 27100 27400 27500 27600 28100 28400 28600 28800 28900 29600 29700 29910 29920 29930 29940 30600 31200 31900"
 
 pyenv_free_threaded=0
-pyenv local | grep 't-dev\|[0-9]t$'
+pyenv local 2>/dev/null | grep 't-dev\|[0-9]t$'
 if [ $? -eq 0 ]; then
   pyenv_free_threaded=1
 fi
@@ -143,6 +147,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-all-attacks)
       ALL_ATTACKS=1
+      shift
+      ;;
+    --allow-self-tests)
+      SELF_TEST_DISABLE=0
       shift
       ;;
     --vector-width-min)
@@ -290,11 +298,21 @@ while [[ $# -gt 0 ]]; do
 
             if [[ "$optarg" == "all" ]]; then
               :
-            elif [[ "$optarg" =~ ^(1|2|4|8|16)$ ]]; then
-              VECTOR_WIDTH="$optarg"
             else
-              echo "Invalid vector width: $optarg"
-              usage
+              VECTOR_WIDTH=""
+              VECTOR_WIDTHS=""
+
+              IFS=',' read -ra INPUT_VECTOR_WIDTHS <<< "$optarg"
+              for vec in "${INPUT_VECTOR_WIDTHS[@]}"; do
+                if [[ "$vec" =~ ^(1|2|4|8|16)$ ]]; then
+                  VECTOR_WIDTHS+=" $vec"
+                else
+                  echo "Invalid Vector width: $vec"
+                  usage
+                fi
+              done
+
+              VECTOR_WIDTHS="$(echo "$VECTOR_WIDTHS" | xargs)"  # Trim leading/trailing spaces
             fi
 
             [[ "$shift_inline" -eq 0 ]] && shift
@@ -508,12 +526,23 @@ if [[ "$VECTOR_WIDTH" != "all" && ( "$VECTOR_WIDTH_MIN" -ne 1 || "$VECTOR_WIDTH_
   usage
 fi
 
+if [ ${SELF_TEST_DISABLE} -eq 1 ]; then
+  OPTS="${OPTS} --self-test-disable"
+fi
+
 if [ ${FORCE} -eq 1 ]; then
   OPTS="${OPTS} --force"
 fi
 
 if [ $METAL_BACKEND -eq 1 ]; then
-  VECTOR_WIDTHS="1 2 4"
+  VECTOR_WIDTHS_FILTER=""
+  for v in $VECTOR_WIDTHS; do
+    if [ "$v" -le 4 ]; then
+      VECTOR_WIDTHS_FILTER="$VECTOR_WIDTHS_FILTER$v "
+    fi
+  done
+
+  VECTOR_WIDTHS="$(echo "$VECTOR_WIDTHS_FILTER" | xargs)"
 
   if [ $VECTOR_WIDTH_MAX -gt 4 ]; then
     VECTOR_WIDTH_MAX=4
@@ -668,9 +697,7 @@ for hash_type in $(ls tools/test_modules/*.pm | cut -d'm' -f3 | cut -d'.' -f1 | 
 
         for vector_width in ${VECTOR_WIDTHS}; do
 
-          if [ $VECTOR_WIDTH != "all" ]; then
-            if [ $VECTOR_WIDTH -ne $vector_width ]; then continue; fi
-          else
+          if [ "$VECTOR_WIDTH" == "all" ]; then
             if [ ${vector_width} -lt ${VECTOR_WIDTH_MIN} ]; then continue; fi
             if [ ${vector_width} -gt ${VECTOR_WIDTH_MAX} ]; then continue; fi
           fi
