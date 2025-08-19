@@ -17,7 +17,7 @@ static const u32   DGST_POS2      = 2;
 static const u32   DGST_POS3      = 3;
 static const u32   DGST_SIZE      = DGST_SIZE_4_4;
 static const u32   HASH_CATEGORY  = HASH_CATEGORY_PASSWORD_MANAGER;
-static const char *HASH_NAME      = "KeePass 1 (AES/Twofish) and KeePass 2 (AES)";
+static const char *HASH_NAME      = "KeePass (KDBX v2/v3)";
 static const u64   KERN_TYPE      = 13400;
 static const u32   OPTI_TYPE      = OPTI_TYPE_ZERO_BYTE;
 static const u64   OPTS_TYPE      = OPTS_TYPE_STOCK_MODULE
@@ -255,6 +255,8 @@ int module_hash_decode (MAYBE_UNUSED const hashconfig_t *hashconfig, MAYBE_UNUSE
   const u8 *version_pos = token.buf[1];
 
   keepass->version = hc_strtoul ((const char *) version_pos, NULL, 10);
+
+  if (keepass->version > 2) return (PARSER_HASH_VALUE); // this hash-type only supports versions 1 and 2; version 4 is supported by hash-type 13450
 
   // iter
 

@@ -1487,8 +1487,8 @@ typedef struct hc_device_param
   double  outerloop_msec;
   double  outerloop_multi;
 
-  u32     innerloop_pos;
-  u32     innerloop_left;
+  u64     innerloop_pos;
+  u64     innerloop_left;
 
   u32     exec_pos;
   double  exec_msec[EXEC_CACHE];
@@ -2779,8 +2779,8 @@ typedef struct device_info
   int     kernel_threads_dev;
   int     vector_width_dev;
   int     salt_pos_dev;
-  int     innerloop_pos_dev;
-  int     innerloop_left_dev;
+  u64     innerloop_pos_dev;
+  u64     innerloop_left_dev;
   int     iteration_pos_dev;
   int     iteration_left_dev;
   char   *device_name;
@@ -3253,7 +3253,6 @@ typedef struct hc_token
 
 typedef enum hash_category
 {
-  HASH_CATEGORY_UNDEFINED               = 0,
   HASH_CATEGORY_RAW_HASH                = 1,
   HASH_CATEGORY_RAW_HASH_SALTED         = 2,
   HASH_CATEGORY_RAW_HASH_AUTHENTICATED  = 3,
@@ -3277,7 +3276,8 @@ typedef enum hash_category
   HASH_CATEGORY_IMS                     = 21,
   HASH_CATEGORY_CRYPTOCURRENCY_WALLET   = 22,
   HASH_CATEGORY_FBE                     = 23,
-  HASH_CATEGORY_APPLICATION_DATABASE    = 24
+  HASH_CATEGORY_APPLICATION_DATABASE    = 24,
+  HASH_CATEGORY_UNDEFINED               = -1,
 } hash_category_t;
 
 // hash specific

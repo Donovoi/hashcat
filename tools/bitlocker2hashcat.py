@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Construct a hash for use with hashcat mode 22100
 # Usage: python3 bitlocker2hashcat.py <bitlocker_image> -o <bitlocker_partition_offset>
 # Hashcat supports modes $bitlocker$0$ and $bitlocker$1$ and therefore this script will output hashes that relate to a VMK protected by a user password only.
@@ -90,12 +91,12 @@ def parse_aes_ccm_encrypted_key(data):
     return nonce, mac, enc_data
 
 def parse_description(data):
-    print("\nParsing description...")    
+    print("\nParsing description...")
     print(f"Info: {data.decode('utf-16')}")
     return
 
 def parse_volume_header_block(data):
-    print("\nParsing volume header block...")        
+    print("\nParsing volume header block...")
     block_offset = uint_to_int(data[0:8])
     block_size   = uint_to_int(data[8:16])
     print(f"Block offset: {hex(block_offset)}")
@@ -140,7 +141,7 @@ def parse_fve_metadata_block(block):
             parse_VMK(data)
         if value_type == 0xf:
             parse_volume_header_block(data)
-        
+
         try:
             entry_size = uint_to_int(block[current_pos:current_pos+2])
         except:
@@ -148,9 +149,9 @@ def parse_fve_metadata_block(block):
 
 def parse_fve_metadata_entry(current_pos, block):
     print("\nParsing FVE metadata entry...")
-    entry_size = uint_to_int(block[0:2]) 
+    entry_size = uint_to_int(block[0:2])
     entry_type = uint_to_int(block[2:4])
-    value_type = uint_to_int(block[4:6]) 
+    value_type = uint_to_int(block[4:6])
     version = hex(uint_to_int(block[6:8]))
     data = block[8:entry_size]
 
@@ -209,14 +210,14 @@ def main():
         # get FVE metadata block addresses
         FVE_metadata_offsets = [hex(uint_to_int(fp.read(8)) + bitlocker_offset) for _ in range(3)]
         print(f'[+] FVE metadata info found at offsets {FVE_metadata_offsets}')
-        
+
         # all metadata blocks should be the same
         for f in FVE_metadata_offsets:
 
             fp.seek(int(f, 16))
             FVE_metadata_block = fp.read(2048)
             parse_fve_metadata_block(FVE_metadata_block)
-        
+
             break
 
     if HASHCAT_HASH == []:
