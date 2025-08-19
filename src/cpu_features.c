@@ -7,9 +7,19 @@
 #include "types.h"
 #include "cpu_features.h"
 
-#if defined(__aarch64__) || defined(__arm64__)
+#if defined (__aarch64__) || defined (__arm64__)
 
 int cpu_supports_sse2 ()     { return 1; }
+int cpu_supports_ssse3 ()    { return 0; }
+int cpu_supports_xop ()      { return 0; }
+int cpu_supports_avx2 ()     { return 0; }
+int cpu_supports_avx512f ()  { return 0; }
+int cpu_supports_avx512vl () { return 0; }
+
+#elif defined(__riscv)
+
+// TODO: Support RVV
+int cpu_supports_sse2 ()     { return 0; }
 int cpu_supports_ssse3 ()    { return 0; }
 int cpu_supports_xop ()      { return 0; }
 int cpu_supports_avx2 ()     { return 0; }

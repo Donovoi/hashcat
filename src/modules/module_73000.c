@@ -19,7 +19,7 @@ static const u32   DGST_POS1      = 1;
 static const u32   DGST_POS2      = 2;
 static const u32   DGST_POS3      = 3;
 static const u32   DGST_SIZE      = DGST_SIZE_4_4;
-static const u32   HASH_CATEGORY  = HASH_CATEGORY_RAW_HASH;
+static const u32   HASH_CATEGORY  = HASH_CATEGORY_UNDEFINED;
 static const char *HASH_NAME      = "Generic Hash [Bridged: Python Interpreter with GIL]";
 static const u64   KERN_TYPE      = 73000;
 static const u32   OPTI_TYPE      = OPTI_TYPE_ZERO_BYTE;
@@ -27,6 +27,7 @@ static const u64   OPTS_TYPE      = OPTS_TYPE_STOCK_MODULE
                                   | OPTS_TYPE_PT_GENERATE_LE
                                   | OPTS_TYPE_AUTODETECT_DISABLE
                                   | OPTS_TYPE_NATIVE_THREADS
+                                  | OPTS_TYPE_MULTIHASH_DESPITE_ESALT
                                   | OPTS_TYPE_MP_MULTI_DISABLE;
 static const u32   SALT_TYPE      = SALT_TYPE_EMBEDDED;
 static const u64   BRIDGE_TYPE    = BRIDGE_TYPE_MATCH_TUNINGS // optional - improves performance
@@ -62,17 +63,18 @@ typedef struct
 
   // output
 
-  u32 out_buf[64];
-  u32 out_len;
+  u32 out_buf[32][64];
+  u32 out_len[32];
+  u32 out_cnt;
 
 } generic_io_tmp_t;
 
 typedef struct
 {
-  u32 hash_buf[16384];
+  u32 hash_buf[256];
   u32 hash_len;
 
-  u32 salt_buf[16384];
+  u32 salt_buf[256];
   u32 salt_len;
 
 } generic_io_t;
@@ -91,13 +93,6 @@ u64 module_esalt_size (MAYBE_UNUSED const hashconfig_t *hashconfig, MAYBE_UNUSED
   return esalt_size;
 }
 
-bool module_potfile_disable (MAYBE_UNUSED const hashconfig_t *hashconfig, MAYBE_UNUSED const user_options_t *user_options, MAYBE_UNUSED const user_options_extra_t *user_options_extra)
-{
-  const bool potfile_disable = true;
-
-  return potfile_disable;
-}
-
 int module_hash_decode (MAYBE_UNUSED const hashconfig_t *hashconfig, MAYBE_UNUSED void *digest_buf, MAYBE_UNUSED salt_t *salt, MAYBE_UNUSED void *esalt_buf, MAYBE_UNUSED void *hook_salt_buf, MAYBE_UNUSED hashinfo_t *hash_info, const char *line_buf, MAYBE_UNUSED const int line_len)
 {
   u32 *digest = (u32 *) digest_buf;
@@ -111,12 +106,12 @@ int module_hash_decode (MAYBE_UNUSED const hashconfig_t *hashconfig, MAYBE_UNUSE
   token.token_cnt  = 2;
 
   token.len_min[0] = 0;
-  token.len_max[0] = 65536;
+  token.len_max[0] = 1024;
   token.sep[0]     = '*';
   token.attr[0]    = TOKEN_ATTR_VERIFY_LENGTH;
 
   token.len_min[1] = 0;
-  token.len_max[1] = 65536;
+  token.len_max[1] = 1024;
   token.sep[1]     = '*';
   token.attr[1]    = TOKEN_ATTR_VERIFY_LENGTH;
 
@@ -247,7 +242,7 @@ void module_init (module_ctx_t *module_ctx)
   module_ctx->module_outfile_check_disable    = MODULE_DEFAULT;
   module_ctx->module_outfile_check_nocomp     = MODULE_DEFAULT;
   module_ctx->module_potfile_custom_check     = MODULE_DEFAULT;
-  module_ctx->module_potfile_disable          = module_potfile_disable;
+  module_ctx->module_potfile_disable          = MODULE_DEFAULT;
   module_ctx->module_potfile_keep_all_hashes  = MODULE_DEFAULT;
   module_ctx->module_pwdump_column            = MODULE_DEFAULT;
   module_ctx->module_pw_max                   = MODULE_DEFAULT;

@@ -15,6 +15,8 @@
 #include "backend.h"
 #include "user_options.h"
 #include "outfile.h"
+#include "rp.h"
+#include "rp_cpu.h"
 
 #ifdef WITH_BRAIN
 #include "brain.h"
@@ -1735,6 +1737,36 @@ int user_options_sanity (hashcat_ctx_t *hashcat_ctx)
     return -1;
   }
 
+  if (user_options->rule_buf_l_chgd == true)
+  {
+    char rule_buf_in[RP_PASSWORD_SIZE]  = { 0 };
+    char rule_buf_out[RP_PASSWORD_SIZE] = { 0 };
+
+    const int rc = _old_apply_rule (user_options->rule_buf_l, strlen (user_options->rule_buf_l), rule_buf_in, 0, rule_buf_out);
+
+    if (rc == RULE_RC_SYNTAX_ERROR)
+    {
+      event_log_error (hashcat_ctx, "Invalid or unsupported rule specified -j/--rule-left: %s", user_options->rule_buf_l);
+
+      return -1;
+    }
+  }
+
+  if (user_options->rule_buf_r_chgd == true)
+  {
+    char rule_buf_in[RP_PASSWORD_SIZE]  = { 0 };
+    char rule_buf_out[RP_PASSWORD_SIZE] = { 0 };
+
+    const int rc = _old_apply_rule (user_options->rule_buf_r, strlen (user_options->rule_buf_r), rule_buf_in, 0, rule_buf_out);
+
+    if (rc == RULE_RC_SYNTAX_ERROR)
+    {
+      event_log_error (hashcat_ctx, "Invalid or unsupported rule specified -k/--rule-right: %s", user_options->rule_buf_r);
+
+      return -1;
+    }
+  }
+
   // argc / argv checks
 
   bool show_error = true;
@@ -2030,7 +2062,7 @@ void user_options_preprocess (hashcat_ctx_t *hashcat_ctx)
 
   if (user_options->hwmon == false)
   {
-    // some algorithm, such as SCRYPT, depend on accurate free memory values
+    // some algorithm, such as SCRYPT and Argon2, depend on accurate free memory values
     // the only way to get them is through low-level APIs such as nvml via hwmon
     // we have --backend-keep-free message now
 
@@ -2064,7 +2096,7 @@ void user_options_preprocess (hashcat_ctx_t *hashcat_ctx)
    || user_options->hash_info         > 0
    || user_options->backend_info      > 0)
   {
-    user_options->hwmon               = false;
+    //user_options->hwmon               = false;
     user_options->left                = false;
     user_options->logfile             = false;
     user_options->spin_damp           = 0;
@@ -2880,6 +2912,20 @@ int user_options_check_files (hashcat_ctx_t *hashcat_ctx)
 
           //return -1;
         }
+
+        if ((user_options->custom_charset_1)
+         || (user_options->custom_charset_2)
+         || (user_options->custom_charset_3)
+         || (user_options->custom_charset_4)
+         || (user_options->custom_charset_5)
+         || (user_options->custom_charset_6)
+         || (user_options->custom_charset_7)
+         || (user_options->custom_charset_8))
+        {
+          event_log_error (hashcat_ctx, "Using --custom-charsetX with mask files is misleading. Put custom charsets in the mask file instead.");
+
+          return -1;
+        }
       }
     }
   }
@@ -2924,6 +2970,20 @@ int user_options_check_files (hashcat_ctx_t *hashcat_ctx)
 
           //return -1;
         }
+
+        if ((user_options->custom_charset_1)
+         || (user_options->custom_charset_2)
+         || (user_options->custom_charset_3)
+         || (user_options->custom_charset_4)
+         || (user_options->custom_charset_5)
+         || (user_options->custom_charset_6)
+         || (user_options->custom_charset_7)
+         || (user_options->custom_charset_8))
+        {
+          event_log_error (hashcat_ctx, "Using --custom-charsetX with mask files is misleading. Put custom charsets in the mask file instead.");
+
+          return -1;
+        }
       }
     }
   }
@@ -2967,6 +3027,20 @@ int user_options_check_files (hashcat_ctx_t *hashcat_ctx)
           event_log_warning (hashcat_ctx, "%s: Byte Order Mark (BOM) was detected", maskfile);
 
           //return -1;
+        }
+
+        if ((user_options->custom_charset_1)
+         || (user_options->custom_charset_2)
+         || (user_options->custom_charset_3)
+         || (user_options->custom_charset_4)
+         || (user_options->custom_charset_5)
+         || (user_options->custom_charset_6)
+         || (user_options->custom_charset_7)
+         || (user_options->custom_charset_8))
+        {
+          event_log_error (hashcat_ctx, "Using --custom-charsetX with mask files is misleading. Put custom charsets in the mask file instead.");
+
+          return -1;
         }
       }
     }

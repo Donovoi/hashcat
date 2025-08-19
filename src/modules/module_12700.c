@@ -51,6 +51,8 @@ typedef struct mywallet_tmp
   u32 dgst[10];
   u32 out[10];
 
+  u32 out1[10];
+
 } mywallet_tmp_t;
 
 static const char *SIGNATURE_MYWALLET = "$blockchain$";
@@ -137,6 +139,7 @@ int module_hash_decode (MAYBE_UNUSED const hashconfig_t *hashconfig, MAYBE_UNUSE
   digest[1] = salt->salt_buf[5];
   digest[2] = salt->salt_buf[6];
   digest[3] = salt->salt_buf[7];
+  digest[4] = 0;
 
   return (PARSER_OK);
 }

@@ -39,7 +39,7 @@ Jean-Christophe "Fist0urs" Delaunay <jean-christophe.delaunay@synacktiv.com> (@F
 * Kerberos TGS Rep enctype 23 kernel module
 * Kerberos TGS Rep enctype 17/18 kernel module
 * AxCrypt kernel module
-* KeePass kernel module
+* KeePass (KDBX v2/v3) kernel module
 * DPAPImk v1 and v2 kernel module
 
 Jeremi "epixoip" Gosney <jgosney@terahash.com> (@jmgosney)
@@ -89,5 +89,10 @@ Jamie Riden <jamie@blacktraffic.co.uk>
 
 Dylan Evans <fin3ss3g0d@pm.me> (@fin3ss3g0d)
 * Apache Shiro 1 SHA-512 plugin
+
+Costin Enache <costin@detack.de>
+* RACF KDFAES module
+* IBM AS400 DES and SSHA1 modules
+* Cisco-ISE Hashed Password (SHA256) module
 
 !!! All the package maintainers of hashcat !!!
