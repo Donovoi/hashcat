@@ -14,7 +14,7 @@ Tested on Windows 11 23H2 x64
     ```
 
     If prompted to close the terminal after core updates, do so, then reopen **MINGW64** and run:
-    
+
     ```sh
     pacman -Syu
     ```
@@ -23,7 +23,7 @@ Tested on Windows 11 23H2 x64
 
      ```sh
      export _GW="mingw-w64-x86_64"
-     pacman -S --needed git make gcc libiconv-devel python3 $_GW-clang $_GW-rustup $_GW-toolchain $_GW-llvm
+     pacman -S --needed git make gcc libiconv-devel python3 $_GW-clang $_GW-rustup $_GW-toolchain $_GW-llvm $_GW-lld
      ```
 
 5. **Ensure MinGW toolchain is first on PATH for this session:**
@@ -106,7 +106,3 @@ To confirm GPU/OpenCL devices are detected:
 ```
 
 If your GPUs appear here, your build is good to go.
-
-[//]: # (@METADATA)
-[//]: #     (@AUTHOR DJ Stomp <85457381+DJStompZone@users.noreply.github.com>)
-[//]: #     (@UPDATED 2025-10-17T01:40:44.856095+00:00)
