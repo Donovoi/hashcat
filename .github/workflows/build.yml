@@ -77,13 +77,14 @@ jobs:
           install: |
             gcc
             git
-            libiconv
             libiconv-devel
             make
             mingw-w64-x86_64-clang
+            mingw-w64-x86_64-lld
+            mingw-w64-x86_64-llvm
             mingw-w64-x86_64-rustup
             mingw-w64-x86_64-toolchain
-            python
+            python3
 
       - name: Setup Rustup (Windows only)
         if: matrix.os_name_lowercase == 'windows'
