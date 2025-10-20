@@ -39,22 +39,31 @@ ifeq (,$(filter $(UNAME),Linux OpenBSD FreeBSD NetBSD DragonFly Darwin CYGWIN MS
 $(error "! Your Operating System ($(UNAME)) is not supported by this Makefile")
 endif
 
-# disable LTO if DEBUG > 0
+# force disable LTO if DEBUG > 0
 ifeq ($(shell [ $(DEBUG) -gt 0 ] && echo true),true)
-ENABLE_LTO := 0
+override ENABLE_LTO := 0
 endif
 
-# disable LTO if MACOS_UNIVERSAL_BINARY == 1
+# force disable LTO if MACOS_UNIVERSAL_BINARY == 1
 ifeq ($(UNAME),Darwin)
 ifeq ($(MACOS_UNIVERSAL_BINARY),1)
-ENABLE_LTO := 0
+override ENABLE_LTO := 0
 endif
 endif
 
 BUILD_MODE := native
 
 ifneq ($(filter binaries linux host_linux modules_linux bridges_linux feeds_linux win host_win modules_win bridges_win feeds_win,$(MAKECMDGOALS)),)
-  BUILD_MODE := cross
+BUILD_MODE := cross
+endif
+
+# force disable LTO if we are in native build and CC == clang and OS is MSYS2 or NetBSD or DragonFly
+ifeq ($(BUILD_MODE),native)
+ifeq ($(CC),clang)
+ifneq (,$(filter MSYS2 NetBSD DragonFly,$(UNAME)))
+override ENABLE_LTO := 0
+endif
+endif
 endif
 
 ifeq ($(DEBUG),1)
@@ -112,16 +121,16 @@ endif
 IS_AARCH64              := $(shell [ "$$(arch 2>/dev/null)" = "aarch64" ] && echo 1 || echo 0)
 IS_ARM                  := $(or $(filter 1,$(IS_APPLE_SILICON)),$(filter 1,$(IS_AARCH64)))
 
-ifneq (,$(filter $(UNAME),FreeBSD NetBSD DragonFly))
+ifneq (,$(filter $(UNAME),OpenBSD FreeBSD NetBSD DragonFly))
 CC                      := cc
 CXX                     := c++
 SED                     := gsed
 endif
 
-ifneq (,$(filter $(UNAME),OpenBSD))
-CC                      := egcc
-CXX                     := eg++
-SED                     := gsed
+ifeq ($(UNAME),NetBSD)
+CC                      := gcc
+CXX                     := g++
+AR                      := gcc-ar
 endif
 
 ##
@@ -226,6 +235,13 @@ ifneq (,$(findstring clang, $(CC)))
 CC_NATIVE_CLANG         := 1
 endif
 
+# force disable LTO if MSYS2 and CC is clang
+ifeq ($(UNAME),MSYS2)
+ifeq ($(CC_NATIVE_CLANG),1)
+override ENABLE_LTO     := 0
+endif
+endif
+
 CFLAGS                  := $(CFLAGS)
 LFLAGS                  := $(LDFLAGS)
 
@@ -238,7 +254,10 @@ CFLAGS                  += -flto=auto
 ifeq ($(CC_NATIVE_CLANG),1)
 CFLAGS                  += -Wno-unknown-warning-option
 endif
-LFLAGS                  += -flto=auto -Wno-lto-type-mismatch
+LFLAGS                  += -flto=auto
+ifeq ($(filter FreeBSD OpenBSD,$(UNAME)),)
+LFLAGS                  += -Wno-lto-type-mismatch
+endif
 endif
 
 ifeq ($(BUILD_MODE),native)
@@ -270,12 +289,8 @@ CFLAGS                  += -Wextra
 endif
 
 ## because LZMA SDK
-ifeq ($(CC_NATIVE_CLANG),1)
+ifeq ($(or $(filter 1,$(CC_NATIVE_CLANG)),$(filter cc,$(CC))),1)
 CFLAGS                  += -Wno-typedef-redefinition
-else
-ifeq ($(CC),cc)
-CFLAGS                  += -Wno-typedef-redefinition
-endif
 endif
 
 ifeq ($(USE_SYSTEM_LZMA),0)
@@ -303,15 +318,19 @@ ifeq ($(USE_SYSTEM_UNRAR),0)
 ifeq ($(UNAME),Darwin)
 CFLAGS_UNRAR            += -std=c++14
 endif
-ifneq ($(CC),clang)
-ifneq ($(UNAME),FreeBSD)
+ifeq ($(CC_NATIVE_CLANG),0)
+ifeq ($(filter FreeBSD OpenBSD,$(UNAME)),)
 CFLAGS_UNRAR            += -Wno-class-memaccess
 endif
 CFLAGS_UNRAR            += -Wno-misleading-indentation
+ifneq ($(UNAME),OpenBSD)
 CFLAGS_UNRAR            += -Wno-format-overflow
+endif
 else
 ifeq ($(IS_APPLE_SILICON),0)
+ifneq ($(filter $(UNAME),FreeBSD OpenBSD NetBSD DragonFly),$(UNAME))
 CFLAGS_UNRAR            += -Wno-nontrivial-memcall
+endif
 endif
 endif
 CFLAGS_UNRAR            += -Wno-missing-braces
@@ -338,8 +357,12 @@ endif
 ifeq ($(DEBUG),0)
 CFLAGS                  += -O2 -fomit-frame-pointer
 ifneq ($(UNAME),Darwin)
+ifeq ($(and $(filter MSYS2,$(UNAME)),$(filter 1,$(CC_NATIVE_CLANG))),)
 CFLAGS                  += -fno-plt
+endif
+ifeq ($(and $(filter DragonFly,$(UNAME)),$(filter 1,$(CC_NATIVE_CLANG))),)
 LFLAGS                  += -s
+endif
 endif
 else
 ifeq ($(DEBUG),1)
@@ -466,6 +489,7 @@ CFLAGS_NATIVE           += -I /usr/pkg/include
 LFLAGS_NATIVE           := $(LFLAGS)
 LFLAGS_NATIVE           += -L /usr/pkg/lib
 LFLAGS_NATIVE           += -lpthread
+LFLAGS_NATIVE           += -lm
 LFLAGS_NATIVE           += -liconv
 endif # NetBSD
 
