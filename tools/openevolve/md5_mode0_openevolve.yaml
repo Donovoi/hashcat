@@ -1,0 +1,26 @@
+max_iterations: 20
+checkpoint_interval: 1
+log_level: INFO
+language: c
+file_suffix: .cl
+diff_based_evolution: true
+max_code_length: 30000
+early_stopping_patience: 5
+convergence_threshold: 0.0005
+llm:
+  primary_model: manual-mutator
+  manual_mode: true
+  temperature: 0.0
+  max_tokens: 4096
+evaluator:
+  timeout: 900
+  max_retries: 0
+  cascade_evaluation: false
+  parallel_evaluations: 1
+  enable_artifacts: true
+prompt:
+  num_top_programs: 2
+  num_diverse_programs: 1
+database:
+  random_seed: 42
+  cleanup_old_artifacts: true
