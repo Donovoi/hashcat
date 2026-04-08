@@ -34,6 +34,13 @@ python3 "${SCRIPT_DIR}/manual_mutator.py" \
   --seed "${SEED}" &
 MUTATOR_PID=$!
 
+sleep 1
+
+if ! kill -0 "${MUTATOR_PID}" >/dev/null 2>&1; then
+  echo "manual mutator failed to start" >&2
+  exit 1
+fi
+
 cleanup() {
   kill "${MUTATOR_PID}" >/dev/null 2>&1 || true
 }

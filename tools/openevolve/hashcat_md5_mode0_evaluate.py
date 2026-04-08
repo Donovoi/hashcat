@@ -8,7 +8,7 @@ from hashcat_md5_mode0_harness import DEFAULT_BASELINE_JSON
 from hashcat_md5_mode0_harness import evaluate_candidate
 
 
-def evaluate (candidate_path: str) -> EvaluationResult:
+def evaluate(candidate_path: str) -> EvaluationResult:
   result = evaluate_candidate(Path(candidate_path), Path(DEFAULT_BASELINE_JSON), write_baseline_if_missing = True)
 
   metrics = {
@@ -39,8 +39,8 @@ def evaluate (candidate_path: str) -> EvaluationResult:
       f"correctness_ok={result['correctness_ok']}\n"
       f"benchmark_ok={result['benchmark_ok']}\n"
       f"speed_samples={result.get('speed_samples', [])}\n"
-      f"correctness_password={result.get('correctness_password', '')}\n"
-      f"correctness_expected={result.get('correctness_expected', '')}\n"
+      f"correctness_plaintext={result.get('correctness_plaintext', '')}\n"
+      f"correctness_expected_plaintext={result.get('correctness_expected_plaintext', '')}\n"
     ),
   }
 

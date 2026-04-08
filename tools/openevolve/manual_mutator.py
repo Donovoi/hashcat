@@ -11,7 +11,7 @@ from pathlib import Path
 CURRENT_PROGRAM_RE = re.compile(r"# Current Program\s+```[^\n]*\n(.*?)\n```", re.S)
 
 
-def extract_current_program (task_payload: dict) -> str:
+def extract_current_program(task_payload: dict) -> str:
   display_prompt = str(task_payload.get("display_prompt", ""))
 
   match = CURRENT_PROGRAM_RE.search(display_prompt)
@@ -31,11 +31,11 @@ def extract_current_program (task_payload: dict) -> str:
   raise RuntimeError("Unable to extract current program from OpenEvolve manual-mode task")
 
 
-def format_diff (search: str, replace: str) -> str:
+def format_diff(search: str, replace: str) -> str:
   return f"<<<<<<< SEARCH\n{search}\n=======\n{replace}\n>>>>>>> REPLACE"
 
 
-def candidate_mutations (code: str) -> list[tuple[str, str]]:
+def candidate_mutations(code: str) -> list[tuple[str, str]]:
   mutations = []
 
   pairs = [
@@ -64,7 +64,7 @@ def candidate_mutations (code: str) -> list[tuple[str, str]]:
   return mutations
 
 
-def build_answer (task_payload: dict, rng: random.Random) -> str:
+def build_answer(task_payload: dict, rng: random.Random) -> str:
   code = extract_current_program(task_payload)
   mutations = candidate_mutations(code)
 
@@ -78,7 +78,7 @@ def build_answer (task_payload: dict, rng: random.Random) -> str:
   return "\n\n".join(format_diff(search, replace) for search, replace in selected)
 
 
-def process_task (task_path: Path, rng: random.Random) -> None:
+def process_task(task_path: Path, rng: random.Random) -> None:
   answer_path = task_path.with_suffix(".answer.json")
 
   if answer_path.exists():
@@ -90,7 +90,7 @@ def process_task (task_path: Path, rng: random.Random) -> None:
   answer_path.write_text(json.dumps({"answer": answer}, indent = 2) + "\n", encoding = "utf-8")
 
 
-def main () -> int:
+def main() -> int:
   parser = argparse.ArgumentParser(description = "Automatic bounded mutator for OpenEvolve manual mode")
   parser.add_argument("--queue-dir", required = True)
   parser.add_argument("--seed", type = int, default = 42)
