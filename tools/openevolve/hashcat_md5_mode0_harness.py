@@ -182,8 +182,12 @@ def run_speed_check(env: dict[str, str], workspace: Path, samples: int, warmup: 
   ])
 
   warmup_outputs = []
+  warmup_stderrs = []
+  warmup_rcs = []
   measured = []
   measured_outputs = []
+  measured_stderrs = []
+  measured_rcs = []
 
   for _ in range(warmup):
     result = run_cmd(cmd, env, REPO_ROOT)
@@ -200,6 +204,8 @@ def run_speed_check(env: dict[str, str], workspace: Path, samples: int, warmup: 
       }
 
     warmup_outputs.append(result.stdout)
+    warmup_stderrs.append(result.stderr)
+    warmup_rcs.append(result.rc)
 
   for _ in range(samples):
     result = run_cmd(cmd, env, REPO_ROOT)
@@ -217,6 +223,8 @@ def run_speed_check(env: dict[str, str], workspace: Path, samples: int, warmup: 
 
     measured.append(parse_speed(result.stdout))
     measured_outputs.append(result.stdout)
+    measured_stderrs.append(result.stderr)
+    measured_rcs.append(result.rc)
 
   median_speed = statistics.median(measured)
   spread = 0.0
@@ -232,8 +240,14 @@ def run_speed_check(env: dict[str, str], workspace: Path, samples: int, warmup: 
       + "\n=== measured ===\n"
       + ("\n--- measured run ---\n".join(measured_outputs) if measured_outputs else "")
     ),
-    "benchmark_stderr": "",
-    "benchmark_rc": 0,
+    "benchmark_stderr": (
+      "=== warmup ===\n"
+      + ("\n--- warmup run ---\n".join(warmup_stderrs) if warmup_stderrs else "")
+      + "\n=== measured ===\n"
+      + ("\n--- measured run ---\n".join(measured_stderrs) if measured_stderrs else "")
+    ),
+    "benchmark_rc": measured_rcs[-1] if measured_rcs else (warmup_rcs[-1] if warmup_rcs else 0),
+    "benchmark_run_rcs": warmup_rcs + measured_rcs,
     "speed_samples": measured,
     "speed_hs": median_speed,
     "speed_spread": spread,
@@ -290,7 +304,6 @@ def evaluate_candidate(candidate_path: Path, baseline_path: Path = DEFAULT_BASEL
       "correctness_ok": correctness_ok,
       "benchmark_ok": benchmark_ok,
     }
-    write_baseline(baseline_path, baseline)
   else:
     raise RuntimeError(f"Baseline file not found: {baseline_path}")
 
@@ -327,6 +340,16 @@ def evaluate_candidate(candidate_path: Path, baseline_path: Path = DEFAULT_BASEL
 
 def baseline_current_kernel(baseline_path: Path) -> dict[str, Any]:
   result = evaluate_candidate(TARGET_KERNEL, baseline_path, write_baseline_if_missing = True)
+
+  if (
+    result["build_ok"] != 1.0
+    or result["correctness_ok"] != 1.0
+    or result["benchmark_ok"] != 1.0
+    or result["speed_hs"] <= 0
+  ):
+    raise RuntimeError(
+      "Refusing to write MD5 mode 0 baseline because build, correctness, or benchmark validation failed"
+    )
 
   baseline = {
     "build_ok": result["build_ok"],
