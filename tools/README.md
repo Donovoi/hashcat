@@ -33,3 +33,7 @@ sudo apt install cryptsetup
 ./test.sh -m 0 -t all
 ```
 All options: `./test.sh --help`
+
+## OpenEvolve MD5 mode 0 harness
+
+For unattended OpenEvolve experiments against `OpenCL/m00000_a0-optimized.cl`, see `tools/openevolve/README.md`.
