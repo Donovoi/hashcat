@@ -42,7 +42,7 @@ class CommandResult:
   stderr: str
 
 
-def parse_reference_pair () -> tuple[str, str]:
+def parse_reference_pair() -> tuple[str, str]:
   module_text = MODULE_REFERENCE.read_text(encoding = "utf-8")
 
   st_pass_match = ST_PASS_RE.search(module_text)
@@ -54,7 +54,7 @@ def parse_reference_pair () -> tuple[str, str]:
   return st_hash_match.group(1), st_pass_match.group(1)
 
 
-def run_cmd (cmd: list[str], env: dict[str, str], cwd: Path) -> CommandResult:
+def run_cmd(cmd: list[str], env: dict[str, str], cwd: Path) -> CommandResult:
   proc = subprocess.run(
     cmd,
     cwd = str(cwd),
@@ -66,7 +66,7 @@ def run_cmd (cmd: list[str], env: dict[str, str], cwd: Path) -> CommandResult:
   return CommandResult(proc.returncode, proc.stdout, proc.stderr)
 
 
-def make_eval_env (workspace: Path) -> dict[str, str]:
+def make_eval_env(workspace: Path) -> dict[str, str]:
   env = os.environ.copy()
 
   xdg_cache_home = workspace / "xdg-cache"
@@ -84,7 +84,7 @@ def make_eval_env (workspace: Path) -> dict[str, str]:
   return env
 
 
-def hashcat_base_cmd (workspace: Path) -> list[str]:
+def hashcat_base_cmd(workspace: Path) -> list[str]:
   return [
     str(HASHCAT_BIN),
     "-m", "0",
@@ -103,15 +103,15 @@ def hashcat_base_cmd (workspace: Path) -> list[str]:
   ]
 
 
-def build_wordlist (path: Path, target_password: str, count: int) -> None:
+def build_wordlist(path: Path, reference_plaintext: str, count: int) -> None:
   with path.open("w", encoding = "utf-8") as fp:
     for idx in range(count):
       fp.write(f"hashcat-openevolve-{idx:05d}\n")
 
-    fp.write(f"{target_password}\n")
+    fp.write(f"{reference_plaintext}\n")
 
 
-def parse_speed (output: str) -> float:
+def parse_speed(output: str) -> float:
   match = SPEED_RE.search(output)
 
   if match is None:
@@ -123,19 +123,19 @@ def parse_speed (output: str) -> float:
   return value * SPEED_UNITS[unit]
 
 
-def ensure_hashcat_built (env: dict[str, str]) -> CommandResult:
+def ensure_hashcat_built(env: dict[str, str]) -> CommandResult:
   return run_cmd(["make", "-s", "PRODUCTION=1"], env, REPO_ROOT)
 
 
-def run_correctness_check (env: dict[str, str], workspace: Path) -> dict[str, Any]:
-  target_hash, target_password = parse_reference_pair()
+def run_correctness_check(env: dict[str, str], workspace: Path) -> dict[str, Any]:
+  target_hash, reference_plaintext = parse_reference_pair()
 
   hash_file = workspace / "md5.hash"
   word_file = workspace / "md5.wordlist"
   out_file  = workspace / "md5.out"
 
   hash_file.write_text(f"{target_hash}\n", encoding = "utf-8")
-  build_wordlist(word_file, target_password, 32)
+  build_wordlist(word_file, reference_plaintext, 32)
 
   cmd = hashcat_base_cmd(workspace)
   cmd.extend([
@@ -148,31 +148,31 @@ def run_correctness_check (env: dict[str, str], workspace: Path) -> dict[str, An
 
   result = run_cmd(cmd, env, REPO_ROOT)
 
-  cracked_password = ""
+  recovered_plaintext = ""
 
   if out_file.exists():
-    cracked_password = out_file.read_text(encoding = "utf-8").strip()
+    recovered_plaintext = out_file.read_text(encoding = "utf-8").strip()
 
-  cracked_ok = (result.rc == 0 and cracked_password == target_password)
+  cracked_ok = (result.rc == 0 and recovered_plaintext == reference_plaintext)
 
   return {
     "correctness_ok": float(cracked_ok),
     "correctness_stdout": result.stdout,
     "correctness_stderr": result.stderr,
-    "correctness_password": cracked_password,
-    "correctness_expected": target_password,
+    "correctness_plaintext": recovered_plaintext,
+    "correctness_expected_plaintext": reference_plaintext,
     "correctness_rc": result.rc,
   }
 
 
-def run_speed_check (env: dict[str, str], workspace: Path, samples: int, warmup: int) -> dict[str, Any]:
-  target_hash, target_password = parse_reference_pair()
+def run_speed_check(env: dict[str, str], workspace: Path, samples: int, warmup: int) -> dict[str, Any]:
+  target_hash, reference_plaintext = parse_reference_pair()
 
   hash_file = workspace / "bench.hash"
   word_file = workspace / "bench.wordlist"
 
   hash_file.write_text(f"{target_hash}\n", encoding = "utf-8")
-  build_wordlist(word_file, target_password, DEFAULT_WORDLIST_SIZE)
+  build_wordlist(word_file, reference_plaintext, DEFAULT_WORDLIST_SIZE)
 
   cmd = hashcat_base_cmd(workspace)
   cmd.extend([
@@ -227,9 +227,10 @@ def run_speed_check (env: dict[str, str], workspace: Path, samples: int, warmup:
   return {
     "benchmark_ok": 1.0,
     "benchmark_stdout": (
-      "\n--- warmup ---\n".join(warmup_outputs)
-      + "\n--- measured ---\n"
-      + "\n--- measured ---\n".join(measured_outputs)
+      "=== warmup ===\n"
+      + ("\n--- warmup run ---\n".join(warmup_outputs) if warmup_outputs else "")
+      + "\n=== measured ===\n"
+      + ("\n--- measured run ---\n".join(measured_outputs) if measured_outputs else "")
     ),
     "benchmark_stderr": "",
     "benchmark_rc": 0,
@@ -239,16 +240,16 @@ def run_speed_check (env: dict[str, str], workspace: Path, samples: int, warmup:
   }
 
 
-def load_baseline (path: Path) -> dict[str, Any]:
+def load_baseline(path: Path) -> dict[str, Any]:
   return json.loads(path.read_text(encoding = "utf-8"))
 
 
-def write_baseline (path: Path, data: dict[str, Any]) -> None:
+def write_baseline(path: Path, data: dict[str, Any]) -> None:
   path.parent.mkdir(parents = True, exist_ok = True)
   path.write_text(json.dumps(data, indent = 2, sort_keys = True) + "\n", encoding = "utf-8")
 
 
-def evaluate_candidate (candidate_path: Path, baseline_path: Path = DEFAULT_BASELINE_JSON, write_baseline_if_missing: bool = False) -> dict[str, Any]:
+def evaluate_candidate(candidate_path: Path, baseline_path: Path = DEFAULT_BASELINE_JSON, write_baseline_if_missing: bool = False) -> dict[str, Any]:
   original_text = TARGET_KERNEL.read_text(encoding = "utf-8")
   candidate_text = candidate_path.read_text(encoding = "utf-8")
 
@@ -324,7 +325,7 @@ def evaluate_candidate (candidate_path: Path, baseline_path: Path = DEFAULT_BASE
   return result
 
 
-def baseline_current_kernel (baseline_path: Path) -> dict[str, Any]:
+def baseline_current_kernel(baseline_path: Path) -> dict[str, Any]:
   result = evaluate_candidate(TARGET_KERNEL, baseline_path, write_baseline_if_missing = True)
 
   baseline = {
@@ -340,7 +341,7 @@ def baseline_current_kernel (baseline_path: Path) -> dict[str, Any]:
   return result
 
 
-def make_json_safe (obj: Any) -> Any:
+def make_json_safe(obj: Any) -> Any:
   if isinstance(obj, Path):
     return str(obj)
 
@@ -353,7 +354,7 @@ def make_json_safe (obj: Any) -> Any:
   return obj
 
 
-def main () -> int:
+def main() -> int:
   parser = argparse.ArgumentParser(description = "Hashcat MD5 mode 0 OpenEvolve harness")
 
   subparsers = parser.add_subparsers(dest = "command", required = True)
